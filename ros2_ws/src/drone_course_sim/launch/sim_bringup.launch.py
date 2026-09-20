@@ -12,7 +12,7 @@ from launch_ros.descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 MODEL = "x500_course_gimbal_0"
-CAM = f"/world/default/model/{MODEL}/link/camera_link/sensor/camera/image"
+CAM = f"/world/course_world/model/{MODEL}/link/camera_link/sensor/camera/image"
 
 
 def generate_launch_description():
@@ -57,6 +57,14 @@ def generate_launch_description():
             arguments=[CAM],
             parameters=[{"use_sim_time": use_sim_time}],
             remappings=[(CAM, "/camera/image_raw")],
+        ),
+
+        # Topic interface to the gimbal. Mirrors how the A8 mini is driven on
+        # the real aircraft: from the onboard computer, not via the autopilot.
+        Node(
+            package="drone_course_sim", executable="gimbal_interface_node.py",
+            name="gimbal_interface", output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
         ),
 
         # base_link -> ... -> camera_optical_frame, from measured joint angles.

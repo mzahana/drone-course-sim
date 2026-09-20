@@ -97,17 +97,32 @@ RUN git clone -b ${PX4_VERSION} --depth 1 --recursive --shallow-submodules \
 # targets from the airframe list, so both are installed into the PX4 tree here
 # -- before the build, so the target exists. See models/README.md for what
 # changed and, more importantly, what deliberately did not.
+# Every asset the course flies is vendored in this repository -- airframe,
+# gimbal and world -- so the simulation does not silently inherit anything from
+# whatever PX4 happens to ship. PX4 spawns models from PX4_GZ_MODELS and globs
+# PX4_GZ_WORLDS to generate make targets, and gz_env.sh overwrites both at run
+# time, so the assets are installed into the PX4 tree here rather than pointed
+# at from outside.
+COPY --chown=${USERNAME}:${USERNAME} models/course_x500_base ${PX4_DIR}/Tools/simulation/gz/models/course_x500_base
+COPY --chown=${USERNAME}:${USERNAME} models/course_x500 ${PX4_DIR}/Tools/simulation/gz/models/course_x500
 COPY --chown=${USERNAME}:${USERNAME} models/course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/course_gimbal
 COPY --chown=${USERNAME}:${USERNAME} models/x500_course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/x500_course_gimbal
+COPY --chown=${USERNAME}:${USERNAME} worlds/course_world.sdf ${PX4_DIR}/Tools/simulation/gz/worlds/course_world.sdf
 COPY --chown=${USERNAME}:${USERNAME} px4/airframes/4090_gz_x500_course_gimbal ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal
 RUN AF=${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt \
     && sed -i 's|^\t4019_gz_x500_gimbal$|\t4019_gz_x500_gimbal\n\t4090_gz_x500_course_gimbal|' $AF \
     && grep -q 4090_gz_x500_course_gimbal $AF \
     && chmod +x ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal \
+    && M=${PX4_DIR}/Tools/simulation/gz/models \
     && python3 -c "import xml.dom.minidom as m, sys; \
-[m.parse(f) for f in sys.argv[1:]]; print('model SDF xml ok')" \
-         ${PX4_DIR}/Tools/simulation/gz/models/course_gimbal/model.sdf \
-         ${PX4_DIR}/Tools/simulation/gz/models/x500_course_gimbal/model.sdf
+[m.parse(f) for f in sys.argv[1:]]; print('course SDF xml ok')" \
+         $M/course_x500_base/model.sdf $M/course_x500/model.sdf \
+         $M/course_gimbal/model.sdf $M/x500_course_gimbal/model.sdf \
+         ${PX4_DIR}/Tools/simulation/gz/worlds/course_world.sdf \
+    && ! grep -rhoE 'model://[a-z0-9_]+' $M/course_x500_base $M/course_x500 \
+         $M/course_gimbal $M/x500_course_gimbal \
+         | sort -u | grep -v '^model://course' \
+    && echo 'course models are self-contained'
 
 USER root
 RUN pip3 install --no-cache-dir --break-system-packages \

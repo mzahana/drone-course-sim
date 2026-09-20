@@ -45,8 +45,12 @@ doctor() {
     else bad "px4 binary not built"; fi
     [ -f "$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal" ] \
         && ok "course gimbal airframe available" || bad "course gimbal airframe missing"
-    [ -d "$PX4_DIR/Tools/simulation/gz/models/x500_course_gimbal" ] \
-        && ok "course gimbal model installed" || bad "course gimbal model missing"
+    for m in course_x500_base course_x500 course_gimbal x500_course_gimbal; do
+        [ -d "$PX4_DIR/Tools/simulation/gz/models/$m" ] \
+            && ok "model $m installed" || bad "model $m missing"
+    done
+    [ -f "$PX4_DIR/Tools/simulation/gz/worlds/course_world.sdf" ] \
+        && ok "course world installed" || bad "course world missing"
 
     echo
     echo "Geoid data (MAVROS will not start without it)"
@@ -82,7 +86,7 @@ init() {
 sim() {
     echo "Starting PX4 SITL with the course gimbal (partition: ${GZ_PARTITION:-unset})..."
     cd "$PX4_DIR" || exit 1
-    make px4_sitl gz_x500_course_gimbal
+    make px4_sitl gz_x500_course_gimbal_course_world
 }
 
 mavros_up() {

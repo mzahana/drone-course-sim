@@ -13,7 +13,7 @@
   direction: GZ_TO_ROS
 
 - ros_topic_name: "/camera/camera_info"
-  gz_topic_name: "/world/default/model/x500_course_gimbal_0/link/camera_link/sensor/camera/camera_info"
+  gz_topic_name: "/world/course_world/model/x500_course_gimbal_0/link/camera_link/sensor/camera/camera_info"
   ros_type_name: "sensor_msgs/msg/CameraInfo"
   gz_type_name: "gz.msgs.CameraInfo"
   direction: GZ_TO_ROS
@@ -22,11 +22,35 @@
 # base_link -> camera_optical_frame chain via the URDF. On the real aircraft the
 # same three joint values come from the SIYI driver instead.
 - ros_topic_name: "/joint_states"
-  gz_topic_name: "/world/default/model/x500_course_gimbal_0/joint_state"
+  gz_topic_name: "/world/course_world/model/x500_course_gimbal_0/joint_state"
   ros_type_name: "sensor_msgs/msg/JointState"
   gz_type_name: "gz.msgs.Model"
   direction: GZ_TO_ROS
 
-# NOTE: the /model/.../command/gimbal_{yaw,pitch,roll} topics are written by PX4
-# itself, so they are deliberately NOT bridged ROS->GZ. Students command the
-# gimbal through MAVROS, which is the path they will use on the real aircraft.
+# Gimbal joint commands, ROS -> Gazebo.
+#
+# PX4 also advertises these, but only writes them when a new setpoint arrives
+# from its gimbal module -- it does not stream, so it does not fight us. On the
+# real aircraft the A8 mini hangs off the onboard computer rather than the
+# autopilot, so commanding the gimbal from ROS is the faithful arrangement, not
+# a simulation shortcut.
+#
+# These are internal: student code talks to /gimbal/cmd/{angle,rate}, which
+# gimbal_interface_node turns into these.
+- ros_topic_name: "/gimbal/_gz/roll"
+  gz_topic_name: "/model/x500_course_gimbal_0/command/gimbal_roll"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "gz.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/gimbal/_gz/pitch"
+  gz_topic_name: "/model/x500_course_gimbal_0/command/gimbal_pitch"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "gz.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/gimbal/_gz/yaw"
+  gz_topic_name: "/model/x500_course_gimbal_0/command/gimbal_yaw"
+  ros_type_name: "std_msgs/msg/Float64"
+  gz_type_name: "gz.msgs.Double"
+  direction: ROS_TO_GZ

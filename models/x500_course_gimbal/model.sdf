@@ -2,7 +2,7 @@
 <sdf version='1.9'>
   <model name='x500_course_gimbal'>
     <include merge='true'>
-      <uri>model://x500</uri>
+      <uri>model://course_x500</uri>
     </include>
     <include merge='true'>
       <uri>model://course_gimbal</uri>
