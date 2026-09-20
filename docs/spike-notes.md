@@ -223,3 +223,27 @@ failed with "not part of the same tree" while *both halves resolved perfectly* w
 hand. The transforms were fine; the check looked up `map -> camera_optical_frame` exactly once,
 before `map -> base_link` had arrived. Worth remembering before trusting a negative result: two
 of the three "failures" in this step were the test, not the system.
+
+
+---
+
+# Step 5 — the detector
+
+YOLO11n runs on the camera stream at 22-26 ms/frame on CPU. `/detections` carries
+`vision_msgs/Detection2DArray` stamped with the image's own time and frame.
+
+**15. Gazebo stamped the camera with the wrong frame.** The sensor's `gz_frame_id` was
+`camera_link`, but ROS convention is that images and `camera_info` carry the *optical* frame, and
+projection code reads `header.frame_id` directly. On this gimbal `camera_link`'s +x points
+backwards, so every student geolocation would have been quietly rotated -- with nothing failing
+and nothing to see. Now set to `camera_optical_frame` in the model.
+
+**16. XML comments cannot contain `--`.** A comment written with an em-dash-style `--` broke the
+model SDF, and Gazebo reports it only as a generic parse error at the wrong line. The build-time
+XML guard caught it immediately, which is precisely why that guard exists.
+
+**17. PX4 make targets are generated from airframes MULTIPLIED BY worlds.** Moving the sim assets
+to install after the PX4 build (so model edits stop costing a five minute rebuild) also moved the
+world -- and cmake then globbed no `course_world.sdf`, so the target vanished and `course sim`
+died with `ninja: unknown target gz_x500_course_gimbal_course_world`. The airframe **and** the
+world must exist before the build; only the models can come after.

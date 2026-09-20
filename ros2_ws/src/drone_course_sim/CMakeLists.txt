@@ -6,5 +6,6 @@ install(PROGRAMS
   scripts/verify_camera_frame.py
   scripts/gimbal_interface_node.py
   scripts/vehicle_tf_node.py
+  scripts/detector_node.py
   DESTINATION lib/${PROJECT_NAME})
 ament_package()

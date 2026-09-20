@@ -97,7 +97,7 @@ build (~5 min); touching only `ros2_ws/` or `docker/scripts/` is seconds.
 | TF `map -> base_link -> camera_optical_frame` | **done**, full chain asserted by `course verify` |
 | Gimbal control from ROS topics | **done** — angle, rate, watchdog |
 | Ground truth for scoring | **blocked** — bridge drops link names |
-| YOLO11n node on the camera stream | not started |
+| YOLO11n detector on the camera stream | **done**, 22-26 ms/frame on CPU |
 | Moving ground target + scenario tiers | not started |
 | Scoring script + detector-blackout injector | not started |
 | Lab skeletons and solutions | not started |
@@ -145,6 +145,34 @@ gives the make target `gz_x500_course_gimbal_course_world`. No PX4 source change
   signs, so flipping the mount silently inverts commanded yaw and roll. Frames are handled
   explicitly in the URDF instead.
 
+### YOLO11n detector
+
+Course-provided infrastructure — students consume `/detections`, they do not write the detector.
+
+| Topic | Type | Direction |
+|---|---|---|
+| `/camera/image_raw` | `sensor_msgs/Image` | in |
+| `/detections` | `vision_msgs/Detection2DArray` | out |
+| `/detector/image_annotated` | `sensor_msgs/Image` | out, optional |
+| `/detector/blackout` | `std_msgs/Float64` | in — seconds to go blind |
+
+22-26 ms per frame for YOLO11n at 640 on CPU, throttled to 10 Hz. It **drops** frames rather
+than queueing them: a backlog produces detections describing where the target used to be.
+Detections carry the image's stamp and frame, never the clock's.
+
+`/detector/blackout` is the robustness-lab tool — publish a duration and the detector silently
+stops reporting (still publishing empty messages) so students can watch their tracker coast on
+prediction, or fail to.
+
+The image, `camera_info` and detections all carry **`camera_optical_frame`**. This was wrong at
+first: Gazebo stamped them `camera_link`, whose +x points *backwards* on this gimbal, and student
+projection code reads `header.frame_id` directly — every geolocation would have been quietly
+rotated. Fixed in the model's `gz_frame_id`.
+
+The build runs a **detector self-test** against a baked sample image and fails if the model finds
+fewer than 3 objects. A weights file that loads but returns nothing is otherwise a silent failure
+that surfaces mid-lab.
+
 ### `map -> base_link`, and why MAVROS does not publish it
 
 `vehicle_tf_node` publishes it from `/mavros/local_position/pose`. MAVROS *can* publish this
@@ -177,8 +205,10 @@ one simulation. `run.sh` therefore uses bridge networking, a per-user `GZ_PARTIT
 
 ## 7. Next, in order
 
-1. **YOLO11n node** against `/camera/image_raw`, publishing detections. The TF chain is now
-   complete, so a detection can be turned straight into a map-frame position.
+1. **The scenario**: a driving ground target on a scripted route, with the difficulty tiers from
+   the course document (stationary -> straight -> turning -> with a detector blackout). Until a
+   target model exists the detector has nothing to find, so this also completes the first
+   genuine end-to-end test of detect -> locate.
 2. **Ground truth for scoring.** Bridging `gz.msgs.Pose_V` → `tf2_msgs/TFMessage` produces empty
    `frame_id`/`child_frame_id`, so link names are lost. Needs a small node reading
    `/world/course_world/pose/info` over gz-transport directly.

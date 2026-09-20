@@ -5,6 +5,7 @@ the autopilot link, the camera, and the TF tree.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -32,6 +33,9 @@ def generate_launch_description():
             description="Always true against SITL. With this false, TF lookups "
                         "by image timestamp silently return the wrong transform."),
         DeclareLaunchArgument("fcu_url", default_value="udp://:14540@127.0.0.1:14557"),
+        DeclareLaunchArgument(
+            "detector", default_value="true",
+            description="Run YOLO11n on the camera stream."),
 
         # MAVROS via node.launch rather than px4.launch: px4.launch hardcodes its
         # config path, and we need local-position TF on and sim time enabled.
@@ -68,6 +72,15 @@ def generate_launch_description():
             arguments=[CAM],
             parameters=[{"use_sim_time": use_sim_time}],
             remappings=[(CAM, "/camera/image_raw")],
+        ),
+
+        # YOLO11n on the camera stream. Course-provided: students consume
+        # /detections, they do not write the detector.
+        Node(
+            package="drone_course_sim", executable="detector_node.py",
+            name="detector", output="screen",
+            condition=IfCondition(LaunchConfiguration("detector")),
+            parameters=[{"use_sim_time": use_sim_time}],
         ),
 
         # map -> base_link from the autopilot's position estimate.

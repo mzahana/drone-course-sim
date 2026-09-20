@@ -73,7 +73,18 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash && python3 -c "import cv_bridge; pr
 # Ultralytics downloads into the working directory, so cd there first.
 RUN mkdir -p /opt/models && cd /opt/models \
     && python3 -c "from ultralytics import YOLO; YOLO('yolo11n.pt')" \
-    && test -f /opt/models/yolo11n.pt
+    && test -f /opt/models/yolo11n.pt \
+    && curl -fsSL -o /opt/models/detector_selftest.jpg https://ultralytics.com/images/bus.jpg
+
+# Prove the detector actually detects, rather than merely that it imports.
+# A model file that loads but returns nothing is a silent failure that would
+# otherwise surface in the middle of the perception lab.
+RUN python3 -c "\
+from ultralytics import YOLO; \
+r = YOLO('/opt/models/yolo11n.pt').predict('/opt/models/detector_selftest.jpg', verbose=False)[0]; \
+n = len(r.boxes); \
+assert n >= 3, f'detector self-test found only {n} objects'; \
+print('detector self-test ok:', n, 'objects')"
 ENV YOLO_WEIGHTS=/opt/models/yolo11n.pt
 
 # ---------------------------------------------------------------- 4. Course user
@@ -103,26 +114,15 @@ RUN git clone -b ${PX4_VERSION} --depth 1 --recursive --shallow-submodules \
 # PX4_GZ_WORLDS to generate make targets, and gz_env.sh overwrites both at run
 # time, so the assets are installed into the PX4 tree here rather than pointed
 # at from outside.
-COPY --chown=${USERNAME}:${USERNAME} models/course_x500_base ${PX4_DIR}/Tools/simulation/gz/models/course_x500_base
-COPY --chown=${USERNAME}:${USERNAME} models/course_x500 ${PX4_DIR}/Tools/simulation/gz/models/course_x500
-COPY --chown=${USERNAME}:${USERNAME} models/course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/course_gimbal
-COPY --chown=${USERNAME}:${USERNAME} models/x500_course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/x500_course_gimbal
+# The world must be here too, not with the models below: PX4 generates its make
+# targets from airframes x worlds at cmake configure time, so a world that
+# arrives after the build yields `ninja: unknown target gz_<model>_<world>`.
 COPY --chown=${USERNAME}:${USERNAME} worlds/course_world.sdf ${PX4_DIR}/Tools/simulation/gz/worlds/course_world.sdf
 COPY --chown=${USERNAME}:${USERNAME} px4/airframes/4090_gz_x500_course_gimbal ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal
 RUN AF=${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt \
     && sed -i 's|^\t4019_gz_x500_gimbal$|\t4019_gz_x500_gimbal\n\t4090_gz_x500_course_gimbal|' $AF \
     && grep -q 4090_gz_x500_course_gimbal $AF \
-    && chmod +x ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal \
-    && M=${PX4_DIR}/Tools/simulation/gz/models \
-    && python3 -c "import xml.dom.minidom as m, sys; \
-[m.parse(f) for f in sys.argv[1:]]; print('course SDF xml ok')" \
-         $M/course_x500_base/model.sdf $M/course_x500/model.sdf \
-         $M/course_gimbal/model.sdf $M/x500_course_gimbal/model.sdf \
-         ${PX4_DIR}/Tools/simulation/gz/worlds/course_world.sdf \
-    && ! grep -rhoE 'model://[a-z0-9_]+' $M/course_x500_base $M/course_x500 \
-         $M/course_gimbal $M/x500_course_gimbal \
-         | sort -u | grep -v '^model://course' \
-    && echo 'course models are self-contained'
+    && chmod +x ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal
 
 USER root
 RUN pip3 install --no-cache-dir --break-system-packages \
@@ -135,6 +135,26 @@ ENV GZ_VENDOR_PREFIX=/opt/ros/${ROS_DISTRO}/opt
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
     && export CMAKE_PREFIX_PATH="${GZ_VENDOR_PREFIX}/gz_transport_vendor:${GZ_VENDOR_PREFIX}/gz_msgs_vendor:${GZ_VENDOR_PREFIX}/gz_math_vendor:${GZ_VENDOR_PREFIX}/gz_utils_vendor:${GZ_VENDOR_PREFIX}/gz_cmake_vendor:${CMAKE_PREFIX_PATH}" \
     && cd ${PX4_DIR} && make px4_sitl_default
+
+# ---------------------------------------------------------------- 5b2. Sim assets
+# Installed AFTER the PX4 build on purpose: only the airframe has to exist
+# before it (make targets are generated from the airframe list), so iterating on
+# a model no longer costs a five minute PX4 rebuild.
+USER ${USERNAME}
+COPY --chown=${USERNAME}:${USERNAME} models/course_x500_base ${PX4_DIR}/Tools/simulation/gz/models/course_x500_base
+COPY --chown=${USERNAME}:${USERNAME} models/course_x500 ${PX4_DIR}/Tools/simulation/gz/models/course_x500
+COPY --chown=${USERNAME}:${USERNAME} models/course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/course_gimbal
+COPY --chown=${USERNAME}:${USERNAME} models/x500_course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/x500_course_gimbal
+RUN M=${PX4_DIR}/Tools/simulation/gz/models \
+    && python3 -c "import xml.dom.minidom as m, sys; \
+[m.parse(f) for f in sys.argv[1:]]; print('course SDF xml ok')" \
+         $M/course_x500_base/model.sdf $M/course_x500/model.sdf \
+         $M/course_gimbal/model.sdf $M/x500_course_gimbal/model.sdf \
+         ${PX4_DIR}/Tools/simulation/gz/worlds/course_world.sdf \
+    && ! grep -rhoE 'model://[a-z0-9_]+' $M/course_x500_base $M/course_x500 \
+         $M/course_gimbal $M/x500_course_gimbal \
+         | sort -u | grep -v '^model://course' \
+    && echo 'course models are self-contained'
 
 # ---------------------------------------------------------------- 5c. Course ROS package
 # Pre-built into the image so students never wait on it, and so a broken course
