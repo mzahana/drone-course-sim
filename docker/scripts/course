@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# The course helper. One command per thing a student needs to do.
+set -uo pipefail
+
+# Source ROS ourselves. `docker exec bash -c` reads no init file at all, and
+# Ubuntu's .bashrc returns early for non-interactive shells -- so relying on an
+# init file means `course sim` works in your terminal and fails in a script.
+if [ -z "${AMENT_PREFIX_PATH:-}" ]; then
+    # ROS's setup.bash reads unbound variables, so `set -u` must be off for it.
+    set +u
+    source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+    set -u
+fi
+export PX4_DIR="${PX4_DIR:-/opt/PX4-Autopilot}"
+export GZ_SIM_RESOURCE_PATH="${PX4_DIR}/Tools/simulation/gz/models:${PX4_DIR}/Tools/simulation/gz/worlds:${GZ_SIM_RESOURCE_PATH:-}"
+
+RED=$'\e[31m'; GRN=$'\e[32m'; YEL=$'\e[33m'; RST=$'\e[0m'
+ok()   { echo "  ${GRN}ok${RST}    $1"; }
+bad()  { echo "  ${RED}FAIL${RST}  $1"; FAILED=1; }
+warn() { echo "  ${YEL}warn${RST}  $1"; }
+
+PX4_DIR="${PX4_DIR:-/opt/PX4-Autopilot}"
+WS="$HOME/shared_volume/ros2_ws"
+
+doctor() {
+    FAILED=0
+    echo "Drone course environment check"
+    echo
+    echo "ROS 2"
+    [ -n "${ROS_DISTRO:-}" ] && ok "ROS_DISTRO=$ROS_DISTRO" || bad "ROS not sourced"
+    command -v ros2 >/dev/null && ok "ros2 CLI" || bad "ros2 CLI missing"
+    ros2 pkg prefix mavros >/dev/null 2>&1 && ok "mavros installed" || bad "mavros missing"
+    ros2 pkg prefix ros_gz_bridge >/dev/null 2>&1 && ok "ros_gz_bridge installed" || bad "ros_gz_bridge missing"
+
+    echo
+    echo "Gazebo"
+    if command -v gz >/dev/null; then ok "gz $(gz sim --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+    else bad "gz not on PATH"; fi
+    [ -d "$PX4_DIR/Tools/simulation/gz/models" ] && ok "PX4 gz models present" || bad "PX4 gz models missing"
+
+    echo
+    echo "PX4"
+    if [ -x "$PX4_DIR/build/px4_sitl_default/bin/px4" ]; then
+        ok "px4 binary built ($(cat "$PX4_DIR/PX4_COURSE_VERSION" 2>/dev/null || echo unknown))"
+    else bad "px4 binary not built"; fi
+    [ -f "$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/4019_gz_x500_gimbal" ] \
+        && ok "gimbal airframe available" || bad "gimbal airframe missing"
+
+    echo
+    echo "Geoid data (MAVROS will not start without it)"
+    [ -d /usr/share/GeographicLib/geoids ] && ok "GeographicLib geoids" || bad "GeographicLib geoids missing"
+
+    echo
+    echo "Perception"
+    python3 -c "import ultralytics" 2>/dev/null && ok "ultralytics" || bad "ultralytics missing"
+    [ -f "${YOLO_WEIGHTS:-/opt/models/yolo11n.pt}" ] && ok "yolo11n weights baked in" || bad "yolo11n weights missing"
+    if python3 -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+        ok "CUDA available"
+    else warn "no CUDA — inference will run on CPU (fine, just slower)"; fi
+
+    echo
+    echo "Graphics"
+    [ -n "${DISPLAY:-}" ] && ok "DISPLAY=$DISPLAY" || warn "no DISPLAY — GUI tools will not open"
+
+    echo
+    echo "Your workspace"
+    [ -d "$WS/src" ] && ok "$WS/src" || warn "no workspace yet — run: course init"
+
+    echo
+    [ "$FAILED" -eq 0 ] && echo "${GRN}Environment looks good.${RST}" || echo "${RED}Something is wrong above.${RST}"
+    return "$FAILED"
+}
+
+init() {
+    mkdir -p "$WS/src"
+    echo "Workspace ready at $WS/src"
+    echo "On your host machine this is ~/drone_course_shared_volume/ros2_ws/src"
+}
+
+sim() {
+    echo "Starting PX4 SITL with the gimballed X500 (partition: ${GZ_PARTITION:-unset})..."
+    cd "$PX4_DIR" || exit 1
+    make px4_sitl gz_x500_gimbal
+}
+
+mavros_up() {
+    ros2 launch mavros px4.launch \
+        fcu_url:="udp://:14540@127.0.0.1:14557" \
+        "$@"
+}
+
+case "${1:-help}" in
+    doctor) doctor ;;
+    init)   init ;;
+    sim)    sim ;;
+    mavros) shift; mavros_up "$@" ;;
+    *) cat <<USAGE
+usage: course <command>
+
+  doctor    check that everything needed is installed and working
+  init      create your ROS 2 workspace in the shared volume
+  sim       start PX4 SITL + Gazebo with the gimballed X500
+  mavros    start MAVROS against the running SITL
+USAGE
+    ;;
+esac

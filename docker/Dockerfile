@@ -1,0 +1,134 @@
+# syntax=docker/dockerfile:1
+#
+# Drone Course simulation image
+#   Ubuntu 24.04 · ROS 2 Jazzy (desktop-full) · Gazebo Harmonic · PX4 v1.17.0 · MAVROS
+#
+# Layer order is deliberate:
+#   * the slow, stable layers (apt, ROS, torch) come first so that iterating on
+#     PX4 or on the course scripts does not re-download 2 GB of wheels;
+#   * PX4 is cloned and built *as the course user*, not as root. SITL writes into
+#     its own build tree at run time, so a root-owned PX4 tree fails at the first
+#     `make px4_sitl` with an unhelpful symlink error. Chowning afterwards would
+#     work but would duplicate the whole 2 GB tree into another layer.
+ARG ROS_DISTRO=jazzy
+FROM osrf/ros:${ROS_DISTRO}-desktop-full
+ARG ROS_DISTRO
+ARG PX4_VERSION=v1.17.0
+ARG USERNAME=user
+SHELL ["/bin/bash", "-c"]
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ---------------------------------------------------------------- 1. PX4 build deps
+COPY scripts/px4_deps.sh /tmp/px4_deps.sh
+RUN /tmp/px4_deps.sh && rm /tmp/px4_deps.sh
+
+# ---------------------------------------------------------------- 2. ROS packages
+# ros_gz pulls the gz_*_vendor packages, i.e. Gazebo Harmonic under
+# /opt/ros/$ROS_DISTRO/opt. That is the ONLY Gazebo in this image: PX4 is built
+# against it below, so the bridge can never be ABI-skewed against the simulator.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-ros-gz \
+      ros-${ROS_DISTRO}-ros-gz-bridge \
+      ros-${ROS_DISTRO}-ros-gz-image \
+      ros-${ROS_DISTRO}-ros-gz-sim \
+      ros-${ROS_DISTRO}-mavros \
+      ros-${ROS_DISTRO}-mavros-extras \
+      ros-${ROS_DISTRO}-mavros-msgs \
+      ros-${ROS_DISTRO}-vision-msgs \
+      ros-${ROS_DISTRO}-image-transport-plugins \
+      ros-${ROS_DISTRO}-rqt-image-view \
+      ros-${ROS_DISTRO}-tf2-tools \
+      ros-${ROS_DISTRO}-xacro \
+      sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# MAVROS refuses to start without the GeographicLib geoid dataset. Doing this at
+# build time is what stops it being every student's first error message.
+RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
+
+# ---------------------------------------------------------------- 3. Perception
+# Two constraints here, and both are easy to get wrong:
+#
+#   * numpy MUST stay on the 1.x that ROS Jazzy was built against. Letting pip
+#     resolve numpy 2.x breaks cv_bridge at import time -- and pip cannot even
+#     replace it, because the system numpy came from dpkg and has no RECORD file.
+#   * torch comes from the CPU index. The default PyPI wheel drags in
+#     cuda-toolkit, cudnn, cublas and triton -- about 3 GB that most student
+#     laptops cannot use. A CUDA variant of this image is a separate build.
+RUN echo "numpy<2" > /tmp/constraints.txt \
+    && pip3 install --no-cache-dir --break-system-packages -c /tmp/constraints.txt \
+         --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+    && pip3 install --no-cache-dir --break-system-packages -c /tmp/constraints.txt \
+         ultralytics onnxruntime \
+    && rm /tmp/constraints.txt
+
+# Guard: if these imports ever fail the image is broken for every perception lab,
+# so fail the build here rather than in front of the class.
+RUN python3 -c "import numpy, cv2, torch, ultralytics; \
+    assert numpy.__version__.startswith('1.'), numpy.__version__; \
+    print('numpy', numpy.__version__, '| torch', torch.__version__)"
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && python3 -c "import cv_bridge; print('cv_bridge ok')"
+
+# Bake the weights in so no student ever waits on a download mid-lab.
+# Ultralytics downloads into the working directory, so cd there first.
+RUN mkdir -p /opt/models && cd /opt/models \
+    && python3 -c "from ultralytics import YOLO; YOLO('yolo11n.pt')" \
+    && test -f /opt/models/yolo11n.pt
+ENV YOLO_WEIGHTS=/opt/models/yolo11n.pt
+
+# ---------------------------------------------------------------- 4. Course user
+RUN useradd -ms /bin/bash ${USERNAME} && echo "${USERNAME}:${USERNAME}" | chpasswd \
+    && usermod -aG sudo,dialout,video ${USERNAME} \
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME}
+
+# ---------------------------------------------------------------- 5. PX4 v1.17.0
+ENV PX4_DIR=/opt/PX4-Autopilot
+RUN mkdir -p ${PX4_DIR} && chown ${USERNAME}:${USERNAME} ${PX4_DIR} \
+    && git config --system --add safe.directory ${PX4_DIR}
+
+USER ${USERNAME}
+RUN git clone -b ${PX4_VERSION} --depth 1 --recursive --shallow-submodules \
+      https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR} \
+    && echo "${PX4_VERSION}" > ${PX4_DIR}/PX4_COURSE_VERSION
+
+USER root
+RUN pip3 install --no-cache-dir --break-system-packages \
+      -r ${PX4_DIR}/Tools/setup/requirements.txt
+
+# Build SITL against the vendored Gazebo. The prefix path is what lets PX4's
+# find_package(gz-transport13) resolve without a second system-wide Gazebo.
+USER ${USERNAME}
+ENV GZ_VENDOR_PREFIX=/opt/ros/${ROS_DISTRO}/opt
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
+    && export CMAKE_PREFIX_PATH="${GZ_VENDOR_PREFIX}/gz_transport_vendor:${GZ_VENDOR_PREFIX}/gz_msgs_vendor:${GZ_VENDOR_PREFIX}/gz_math_vendor:${GZ_VENDOR_PREFIX}/gz_utils_vendor:${GZ_VENDOR_PREFIX}/gz_cmake_vendor:${CMAKE_PREFIX_PATH}" \
+    && cd ${PX4_DIR} && make px4_sitl_default
+
+# ---------------------------------------------------------------- 6. Entrypoint
+USER root
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY scripts/course /usr/local/bin/course
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/course
+
+# `docker exec` bypasses the entrypoint, and run.sh uses exec to open extra
+# terminals -- so without this every second terminal a student opens has no ROS
+# on it, and the px4 binary cannot find the vendored Gazebo libraries.
+# Static environment as ENV so it reaches EVERY exec session, whatever shell
+# form is used -- `docker exec bash -c` reads no init file at all.
+ENV GZ_PARTITION=course_local \
+    ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+    GZ_SIM_RESOURCE_PATH=/opt/PX4-Autopilot/Tools/simulation/gz/models:/opt/PX4-Autopilot/Tools/simulation/gz/worlds
+
+# Interactive terminals additionally get ROS sourced. This must be PREPENDED:
+# Ubuntu's stock .bashrc returns early for non-interactive shells, so anything
+# appended after that guard silently never runs.
+USER ${USERNAME}
+RUN printf '%s\n' \
+      'source /opt/ros/'"${ROS_DISTRO}"'/setup.bash' \
+      '[ -f $HOME/shared_volume/ros2_ws/install/setup.bash ] && source $HOME/shared_volume/ros2_ws/install/setup.bash' \
+      '' > /tmp/course_rc \
+    && cat /home/${USERNAME}/.bashrc >> /tmp/course_rc \
+    && mv /tmp/course_rc /home/${USERNAME}/.bashrc
+
+WORKDIR /home/${USERNAME}
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["bash"]
