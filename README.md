@@ -98,4 +98,7 @@ docs/                 validation notes
 cd docker && make build
 ```
 
-Students should **pull** rather than build — the image is large and the build takes a while.
+Students should **pull** rather than build — the build takes a while.
+
+**Disk**: about 3.4 GB to download, but roughly **13 GB on disk** once unpacked. Tell students
+to have the space free before the first session.

@@ -19,7 +19,7 @@ SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ---------------------------------------------------------------- 1. PX4 build deps
-COPY scripts/px4_deps.sh /tmp/px4_deps.sh
+COPY docker/scripts/px4_deps.sh /tmp/px4_deps.sh
 RUN /tmp/px4_deps.sh && rm /tmp/px4_deps.sh
 
 # ---------------------------------------------------------------- 2. ROS packages
@@ -91,6 +91,24 @@ RUN git clone -b ${PX4_VERSION} --depth 1 --recursive --shallow-submodules \
       https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR} \
     && echo "${PX4_VERSION}" > ${PX4_DIR}/PX4_COURSE_VERSION
 
+# ---------------------------------------------------------------- 5b. Course model
+# The course flies its own gimbal model (A8-mini-like optics, joint state
+# feedback). PX4 spawns models from its own models directory and generates make
+# targets from the airframe list, so both are installed into the PX4 tree here
+# -- before the build, so the target exists. See models/README.md for what
+# changed and, more importantly, what deliberately did not.
+COPY --chown=${USERNAME}:${USERNAME} models/course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/course_gimbal
+COPY --chown=${USERNAME}:${USERNAME} models/x500_course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/x500_course_gimbal
+COPY --chown=${USERNAME}:${USERNAME} px4/airframes/4090_gz_x500_course_gimbal ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal
+RUN AF=${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt \
+    && sed -i 's|^\t4019_gz_x500_gimbal$|\t4019_gz_x500_gimbal\n\t4090_gz_x500_course_gimbal|' $AF \
+    && grep -q 4090_gz_x500_course_gimbal $AF \
+    && chmod +x ${PX4_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal \
+    && python3 -c "import xml.dom.minidom as m, sys; \
+[m.parse(f) for f in sys.argv[1:]]; print('model SDF xml ok')" \
+         ${PX4_DIR}/Tools/simulation/gz/models/course_gimbal/model.sdf \
+         ${PX4_DIR}/Tools/simulation/gz/models/x500_course_gimbal/model.sdf
+
 USER root
 RUN pip3 install --no-cache-dir --break-system-packages \
       -r ${PX4_DIR}/Tools/setup/requirements.txt
@@ -103,10 +121,22 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
     && export CMAKE_PREFIX_PATH="${GZ_VENDOR_PREFIX}/gz_transport_vendor:${GZ_VENDOR_PREFIX}/gz_msgs_vendor:${GZ_VENDOR_PREFIX}/gz_math_vendor:${GZ_VENDOR_PREFIX}/gz_utils_vendor:${GZ_VENDOR_PREFIX}/gz_cmake_vendor:${CMAKE_PREFIX_PATH}" \
     && cd ${PX4_DIR} && make px4_sitl_default
 
+# ---------------------------------------------------------------- 5c. Course ROS package
+# Pre-built into the image so students never wait on it, and so a broken course
+# package fails the build rather than the lab. Their OWN code lives in the
+# shared volume and is built there.
+ENV COURSE_WS=/opt/course_ws
+USER root
+RUN mkdir -p ${COURSE_WS}/src && chown -R ${USERNAME}:${USERNAME} ${COURSE_WS}
+USER ${USERNAME}
+COPY --chown=${USERNAME}:${USERNAME} ros2_ws/src/drone_course_sim ${COURSE_WS}/src/drone_course_sim
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
+    && cd ${COURSE_WS} && colcon build --packages-select drone_course_sim
+
 # ---------------------------------------------------------------- 6. Entrypoint
 USER root
-COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY scripts/course /usr/local/bin/course
+COPY docker/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/scripts/course /usr/local/bin/course
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/course
 
 # `docker exec` bypasses the entrypoint, and run.sh uses exec to open extra
@@ -124,6 +154,7 @@ ENV GZ_PARTITION=course_local \
 USER ${USERNAME}
 RUN printf '%s\n' \
       'source /opt/ros/'"${ROS_DISTRO}"'/setup.bash' \
+      '[ -f /opt/course_ws/install/setup.bash ] && source /opt/course_ws/install/setup.bash' \
       '[ -f $HOME/shared_volume/ros2_ws/install/setup.bash ] && source $HOME/shared_volume/ros2_ws/install/setup.bash' \
       '' > /tmp/course_rc \
     && cat /home/${USERNAME}/.bashrc >> /tmp/course_rc \

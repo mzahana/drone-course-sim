@@ -1,0 +1,29 @@
+#!/bin/sh
+#
+# @name Gazebo x500 with course gimbal
+#
+# @type Quadrotor
+#
+# X500 with the course gimbal: A8-mini-like optics (81 deg HFOV) and joint
+# state feedback, so the TF tree can be built from measured angles and checked
+# against simulator truth.
+#
+
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=x500_course_gimbal}
+
+. ${R}etc/init.d-posix/airframes/4001_gz_x500
+
+# Gimbal: take commands over MAVLink, drive the simulated gimbal directly.
+param set-default MNT_MODE_IN 4
+param set-default MNT_MODE_OUT 2
+param set-default MNT_RC_IN_MODE 1
+
+param set-default MNT_MAN_ROLL 1
+param set-default MNT_MAN_PITCH 2
+param set-default MNT_MAN_YAW 3
+
+# Travel limits. Pitch is the one that matters for a downward-looking search:
+# the A8 mini reaches 90 deg down, and the course geolocation maths assumes it.
+param set-default MNT_RANGE_ROLL 180
+param set-default MNT_RANGE_PITCH 180
+param set-default MNT_RANGE_YAW 720

@@ -43,8 +43,10 @@ doctor() {
     if [ -x "$PX4_DIR/build/px4_sitl_default/bin/px4" ]; then
         ok "px4 binary built ($(cat "$PX4_DIR/PX4_COURSE_VERSION" 2>/dev/null || echo unknown))"
     else bad "px4 binary not built"; fi
-    [ -f "$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/4019_gz_x500_gimbal" ] \
-        && ok "gimbal airframe available" || bad "gimbal airframe missing"
+    [ -f "$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal" ] \
+        && ok "course gimbal airframe available" || bad "course gimbal airframe missing"
+    [ -d "$PX4_DIR/Tools/simulation/gz/models/x500_course_gimbal" ] \
+        && ok "course gimbal model installed" || bad "course gimbal model missing"
 
     echo
     echo "Geoid data (MAVROS will not start without it)"
@@ -78,9 +80,9 @@ init() {
 }
 
 sim() {
-    echo "Starting PX4 SITL with the gimballed X500 (partition: ${GZ_PARTITION:-unset})..."
+    echo "Starting PX4 SITL with the course gimbal (partition: ${GZ_PARTITION:-unset})..."
     cd "$PX4_DIR" || exit 1
-    make px4_sitl gz_x500_gimbal
+    make px4_sitl gz_x500_course_gimbal
 }
 
 mavros_up() {
@@ -89,8 +91,18 @@ mavros_up() {
         "$@"
 }
 
+bringup() {
+    ros2 launch drone_course_sim sim_bringup.launch.py "$@"
+}
+
+verify() {
+    ros2 run drone_course_sim verify_camera_frame.py
+}
+
 case "${1:-help}" in
     doctor) doctor ;;
+    bringup) shift; bringup "$@" ;;
+    verify) verify ;;
     init)   init ;;
     sim)    sim ;;
     mavros) shift; mavros_up "$@" ;;
@@ -99,7 +111,9 @@ usage: course <command>
 
   doctor    check that everything needed is installed and working
   init      create your ROS 2 workspace in the shared volume
-  sim       start PX4 SITL + Gazebo with the gimballed X500
+  sim       start PX4 SITL + Gazebo with the course gimbal
+  bringup   start MAVROS, the gz bridges and the TF tree
+  verify    check that base_link -> camera_optical_frame is correct
   mavros    start MAVROS against the running SITL
 USAGE
     ;;

@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+<!--
+  TF tree for the course aircraft.
+
+  The link origins are NOT guessed from the SDF: they were read out of a running
+  simulation. In the assembled model every gimbal link origin coincides at the
+  gimbal's rotation centre, which sits 0.02 m above base_link (base_link is at
+  z = 0.24 in the model frame, the gimbal is merged at z = 0.26). That is why
+  the three revolute joints below have zero translation.
+
+  Joint angles come from /joint_states. In simulation those are published by the
+  model's JointStatePublisher; on the real aircraft the SIYI driver's attitude
+  feedback is converted into the same three joint values. Same URDF, same TF
+  tree, same student code.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="x500_course_gimbal">
+
+  <xacro:property name="pi2" value="1.5707963267948966"/>
+  <!-- Gimbal rotation centre relative to base_link. -->
+  <xacro:property name="mount_z" value="0.02"/>
+
+  <link name="base_link"/>
+  <link name="cgo3_mount_link"/>
+  <link name="cgo3_vertical_arm_link"/>
+  <link name="cgo3_horizontal_arm_link"/>
+  <link name="camera_link"/>
+  <link name="camera_optical_frame"/>
+
+  <!-- The mount carries a 180 deg yaw, exactly as the model does. It is kept
+       rather than "cleaned up" because PX4's gimbal control depends on the
+       resulting joint sign conventions. See models/README.md. -->
+  <joint name="gimbal_mount_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="cgo3_mount_link"/>
+    <origin xyz="0 0 ${mount_z}" rpy="0 0 ${pi2*2}"/>
+  </joint>
+
+  <joint name="cgo3_vertical_arm_joint" type="revolute">   <!-- yaw -->
+    <parent link="cgo3_mount_link"/>
+    <child link="cgo3_vertical_arm_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="${-pi2*4}" upper="${pi2*4}" effort="10" velocity="6"/>
+  </joint>
+
+  <joint name="cgo3_horizontal_arm_joint" type="revolute"> <!-- roll -->
+    <parent link="cgo3_vertical_arm_link"/>
+    <child link="cgo3_horizontal_arm_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="-1 0 0"/>
+    <limit lower="${-pi2}" upper="${pi2}" effort="10" velocity="6"/>
+  </joint>
+
+  <joint name="cgo3_camera_joint" type="revolute">         <!-- pitch -->
+    <parent link="cgo3_horizontal_arm_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="${-pi2}" upper="${pi2}" effort="10" velocity="6"/>
+  </joint>
+
+  <!--
+    camera_link's +x points BACKWARDS: the camera sensor inside the model
+    carries its own 180 deg yaw, which cancels the mount's 180 deg so that the
+    camera looks forward. This joint undoes that and converts to the optical
+    convention (z forward, x right, y down) in one step.
+
+    rpy = (-pi/2, 0, +pi/2) gives, in camera_link coordinates:
+        optical x = camera_link +y  = aircraft right
+        optical y = camera_link -z  = aircraft down
+        optical z = camera_link -x  = aircraft forward
+    which is what image geometry expects.
+  -->
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="${-pi2} 0 ${pi2}"/>
+  </joint>
+
+</robot>

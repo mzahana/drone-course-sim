@@ -125,3 +125,76 @@ directly over gz-transport.
    `pitchyaw` as a *service*, which is unsuitable for a 30 Hz tracking loop — the same problem
    the real driver had to solve).
 4. YOLO11n node against `/camera/image_raw`.
+
+---
+
+# Step 3 — course gimbal model, and a verified camera frame
+
+**The camera optical frame is now correct and asserted by a test.**
+
+```
+gimbal joints: {vertical_arm: 0.0, horizontal_arm: 0.0, camera: 0.0}
+translation: (+0.0000, +0.0000, +0.0200)
+  ok   optical x (image right)  = (-0.000, -1.000, -0.000)   aircraft right
+  ok   optical y (image down)   = (-0.000, +0.000, -1.000)   aircraft down
+  ok   optical z (view dir)     = (+1.000, -0.000, -0.000)   aircraft forward
+```
+
+## What was actually wrong
+
+**The mount offset was 0.26 m; it should be 0.02 m.** PX4 merges the gimbal at z = 0.26 in the
+*model* frame, but `base_link` itself sits at z = 0.24 there — so relative to `base_link` the
+gimbal centre is 0.02 m up, not 0.26 m. Reading it off the SDF gives the wrong answer; reading it
+out of a running simulation gives the right one. A 24 cm lever-arm error is not catastrophic at
+30 m range, but it is exactly the kind of quiet bias that makes a geolocation lab unteachable.
+
+**The rotation composition was never derived, it was verified.** Rather than reason about three
+chained 180 degree rotations on paper, the link poses were dumped from a live simulation
+(`/world/default/dynamic_pose/info`), which showed every gimbal link origin coinciding at the
+rotation centre with a uniform 180 degree yaw. The URDF encodes exactly that, and
+`verify_camera_frame.py` asserts the resulting axes.
+
+## Course model
+
+`models/x500_course_gimbal` (see `models/README.md`):
+
+- **FOV 2.0 rad -> 1.414 rad.** The stock lens is a 114.6 degree fisheye; the A8 mini is ~81. The
+  whole altitude/look-angle/detection-range discussion is meaningless with the wrong optics.
+- **Joint state feedback added**, so TF is built from measured angles and can be checked
+  against truth.
+- **`3.14` replaced with pi.** The stock model's literal `3.14` is a built-in 0.09 degree error,
+  which is indefensible in a course that teaches an angular error budget.
+- **Kinematic conventions deliberately unchanged**, because PX4's gimbal control depends on the
+  joint signs. The frames are handled explicitly in the URDF instead.
+
+Installed into the PX4 tree at image build time with airframe `4090_gz_x500_course_gimbal`, so
+`PX4_SIM_MODEL` selects it with no PX4 source changes.
+
+## More gotchas
+
+**10. `robot_description` must be wrapped.** A `Command(["xacro", ...])` substitution passed
+straight to `robot_state_publisher` makes launch try to parse the URDF as YAML and abort the
+*entire* launch file. It needs `ParameterValue(..., value_type=str)`.
+
+**11. Editing SDF with string splices is dangerous.** An `rindex("</model>")` splice silently ate
+the closing `</sdf>`, and the failure surfaced much later as an opaque Gazebo parse error. The
+build now validates both model SDFs as XML, alongside the numpy/cv_bridge guard.
+
+**12. Image size, corrected.** Earlier notes said 3.42 GB. That is the *content* size; **disk
+usage is 12.9 GB**. Students need ~13 GB free.
+
+## Open issue: commanding the gimbal from ROS
+
+`/mavros/gimbal_control/manager/pitchyaw` returns `success=False, result=2` (DENIED), with or
+without acquiring control via `manager/configure` (which itself succeeds), and with either
+`gimbal_device_id` 0 or 1. Manager status reports `gimbal_device_id: 1`, `sysid_primary: 1`,
+`compid_primary: 1`.
+
+Publishing straight to the Gazebo joint command topics does not work either: PX4 republishes the
+commanded angles continuously and immediately overrides them.
+
+So the gimbal currently cannot be pointed from ROS. This does not affect the TF tree, which is
+verified independently, but it **blocks the Lab 4 tracking loop** and is the next thing to fix.
+Note also that `pitchyaw` is a *service*: even once it works it is unsuitable for a 30 Hz
+tracking loop, so the course needs a high-rate topic interface over it — the same problem the
+real SIYI driver had to solve.

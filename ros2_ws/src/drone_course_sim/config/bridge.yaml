@@ -1,8 +1,8 @@
-# ros_gz bridge for the gimballed X500 (PX4 airframe 4019_gz_x500_gimbal).
+# ros_gz bridge for the course aircraft (x500_course_gimbal).
 #
-# Gazebo names the model x500_gimbal_0 and nests sensor topics under the world,
-# which makes for unusable topic names in a lab. Everything is renamed here to
-# short, stable names that student code can hard-code without fear.
+# Gazebo nests sensor topics under the world and appends an instance number to
+# the model name, which makes for unusable topic names in a lab. Everything is
+# renamed here to short, stable names that student code can hard-code.
 
 # Simulation clock. Every node in the course must run with use_sim_time:=true,
 # otherwise TF lookups by image timestamp silently return the wrong transform.
@@ -12,24 +12,21 @@
   gz_type_name: "gz.msgs.Clock"
   direction: GZ_TO_ROS
 
-# Gimbal camera.
 - ros_topic_name: "/camera/camera_info"
-  gz_topic_name: "/world/default/model/x500_gimbal_0/link/camera_link/sensor/camera/camera_info"
+  gz_topic_name: "/world/default/model/x500_course_gimbal_0/link/camera_link/sensor/camera/camera_info"
   ros_type_name: "sensor_msgs/msg/CameraInfo"
   gz_type_name: "gz.msgs.CameraInfo"
   direction: GZ_TO_ROS
 
-# NOTE: the gimbal's /model/.../command/gimbal_{yaw,pitch,roll} topics are
-# written by PX4 itself, so they are deliberately NOT bridged ROS->GZ here.
-# Students command the gimbal through MAVROS, which is the same path they will
-# use on the real aircraft. A high-rate topic interface matching the SIYI
-# driver is layered on top of that separately.
-
-# Ground truth. For the scoring script and for debugging ONLY -- never for
-# flight. Anything a student's mission depends on must come from a sensor that
-# also exists on the real aircraft.
-- ros_topic_name: "/gt/poses"
-  gz_topic_name: "/world/default/dynamic_pose/info"
-  ros_type_name: "tf2_msgs/msg/TFMessage"
-  gz_type_name: "gz.msgs.Pose_V"
+# Measured gimbal joint angles. robot_state_publisher turns these into the
+# base_link -> camera_optical_frame chain via the URDF. On the real aircraft the
+# same three joint values come from the SIYI driver instead.
+- ros_topic_name: "/joint_states"
+  gz_topic_name: "/world/default/model/x500_course_gimbal_0/joint_state"
+  ros_type_name: "sensor_msgs/msg/JointState"
+  gz_type_name: "gz.msgs.Model"
   direction: GZ_TO_ROS
+
+# NOTE: the /model/.../command/gimbal_{yaw,pitch,roll} topics are written by PX4
+# itself, so they are deliberately NOT bridged ROS->GZ. Students command the
+# gimbal through MAVROS, which is the path they will use on the real aircraft.
