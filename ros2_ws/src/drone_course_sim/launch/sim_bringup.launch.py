@@ -33,11 +33,22 @@ def generate_launch_description():
                         "by image timestamp silently return the wrong transform."),
         DeclareLaunchArgument("fcu_url", default_value="udp://:14540@127.0.0.1:14557"),
 
+        # MAVROS via node.launch rather than px4.launch: px4.launch hardcodes its
+        # config path, and we need local-position TF on and sim time enabled.
         IncludeLaunchDescription(
             AnyLaunchDescriptionSource([
-                PathJoinSubstitution([FindPackageShare("mavros"), "launch", "px4.launch"])
+                PathJoinSubstitution([FindPackageShare("mavros"), "launch", "node.launch"])
             ]),
-            launch_arguments={"fcu_url": LaunchConfiguration("fcu_url")}.items(),
+            launch_arguments={
+                "fcu_url": LaunchConfiguration("fcu_url"),
+                "gcs_url": "",
+                "tgt_system": "1",
+                "tgt_component": "1",
+                "pluginlists_yaml": PathJoinSubstitution(
+                    [pkg, "config", "mavros_pluginlists.yaml"]),
+                "config_yaml": PathJoinSubstitution(
+                    [pkg, "config", "mavros_px4.yaml"]),
+            }.items(),
         ),
 
         Node(
@@ -57,6 +68,13 @@ def generate_launch_description():
             arguments=[CAM],
             parameters=[{"use_sim_time": use_sim_time}],
             remappings=[(CAM, "/camera/image_raw")],
+        ),
+
+        # map -> base_link from the autopilot's position estimate.
+        Node(
+            package="drone_course_sim", executable="vehicle_tf_node.py",
+            name="vehicle_tf", output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
         ),
 
         # Topic interface to the gimbal. Mirrors how the A8 mini is driven on

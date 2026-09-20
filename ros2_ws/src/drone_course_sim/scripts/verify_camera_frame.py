@@ -69,6 +69,30 @@ class Verifier(Node):
                   "Is the sim running and sim_bringup launched?")
             return 1
 
+        # The gimbal half of the tree is useless on its own. Geolocation needs a
+        # path from the world to the camera, and map -> base_link comes from
+        # MAVROS, which does not publish it unless tf.send is on.
+        # Retry: map -> base_link comes from the autopilot's position estimate,
+        # which appears a little after the gimbal transforms do.
+        chain_deadline = self.get_clock().now().nanoseconds + 15e9
+        chain_err = None
+        while rclpy.ok() and self.get_clock().now().nanoseconds < chain_deadline:
+            rclpy.spin_once(self, timeout_sec=0.2)
+            try:
+                self.buf.lookup_transform("map", "camera_optical_frame", rclpy.time.Time())
+                chain_err = None
+                break
+            except tf2_ros.TransformException as exc:
+                chain_err = exc
+
+        if chain_err is not None:
+            print(f"  FAIL map -> camera_optical_frame does not resolve: {chain_err}")
+            print("       Geolocation cannot work: a detection can become a bearing "
+                  "but never a world position.")
+            print("       Check that MAVROS is connected and vehicle_tf is running.")
+            return 1
+        print("  ok   map -> camera_optical_frame resolves (full chain)")
+
         if self.joints:
             worst = max((abs(v) for v in self.joints.values()), default=0.0)
             print("gimbal joints:", {k: round(v, 4) for k, v in self.joints.items()})

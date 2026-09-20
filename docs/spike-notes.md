@@ -198,3 +198,28 @@ verified independently, but it **blocks the Lab 4 tracking loop** and is the nex
 Note also that `pitchyaw` is a *service*: even once it works it is unsuitable for a 30 Hz
 tracking loop, so the course needs a high-rate topic interface over it — the same problem the
 real SIYI driver had to solve.
+
+
+---
+
+# Step 4 — the full TF chain
+
+`map -> base_link -> ... -> camera_optical_frame` now resolves, and `course verify` asserts the
+whole chain rather than just the gimbal half. Geolocation is unblocked.
+
+**13. MAVROS plugin sub-nodes never see the parameters file.** MAVROS's `local_position` plugin
+can publish `map -> base_link` itself via `tf.send`, but its plugins run as sub-nodes
+(`/mavros/local_position`) that are constructed without the params file. Measured directly:
+`use_sim_time` is True on `/mavros` and False on `/mavros/local_position`, and `tf.send` stays
+False whatever the YAML says — it can only be changed with `ros2 param set` at runtime.
+
+Two consequences. `px4.launch` also *hardcodes* its config path, so the config has to be vendored
+and `node.launch` driven directly. And even then the plugin parameters do not apply, so the
+transform is published by `vehicle_tf_node` instead. `tf.send` is left off deliberately, so
+MAVROS cannot publish a competing copy.
+
+**14. A verification that does not retry is a broken verification.** The first full-chain check
+failed with "not part of the same tree" while *both halves resolved perfectly* when tested by
+hand. The transforms were fine; the check looked up `map -> camera_optical_frame` exactly once,
+before `map -> base_link` had arrived. Worth remembering before trusting a negative result: two
+of the three "failures" in this step were the test, not the system.

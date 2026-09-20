@@ -94,10 +94,9 @@ build (~5 min); touching only `ros2_ws/` or `docker/scripts/` is seconds.
 | ROS 2 Jazzy + Gazebo Harmonic + PX4 v1.17 + MAVROS in one image | **done**, validated |
 | Self-contained sim assets (airframe, gimbal, world) | **done**, asserted at build time |
 | Camera into ROS (`/camera/image_raw`, `camera_info`) | **done**, ~25 Hz |
-| TF `base_link -> camera_optical_frame` | **done**, asserted by `course verify` |
+| TF `map -> base_link -> camera_optical_frame` | **done**, full chain asserted by `course verify` |
 | Gimbal control from ROS topics | **done** — angle, rate, watchdog |
 | Ground truth for scoring | **blocked** — bridge drops link names |
-| `map -> base_link` TF from MAVROS | **not done** — geolocation needs it |
 | YOLO11n node on the camera stream | not started |
 | Moving ground target + scenario tiers | not started |
 | Scoring script + detector-blackout injector | not started |
@@ -146,6 +145,20 @@ gives the make target `gz_x500_course_gimbal_course_world`. No PX4 source change
   signs, so flipping the mount silently inverts commanded yaw and roll. Frames are handled
   explicitly in the URDF instead.
 
+### `map -> base_link`, and why MAVROS does not publish it
+
+`vehicle_tf_node` publishes it from `/mavros/local_position/pose`. MAVROS *can* publish this
+itself via `local_position`'s `tf.send`, and that is the obvious thing to reach for — but its
+plugins run as **sub-nodes that never receive the parameters file**. `use_sim_time` included.
+Confirmed directly: `use_sim_time` reads True on `/mavros` and False on
+`/mavros/local_position`, and `tf.send` stays False no matter what the YAML says (it can only
+be set at runtime with `ros2 param set`).
+
+So `tf.send` is deliberately left **off** in `config/mavros_px4.yaml`, and the transform is
+published by a course node that runs on the same clock as everything else. This is also the
+honest arrangement: on the real aircraft this transform is an EKF2 *estimate* arriving over
+MAVLink, and `/mavros/local_position/pose` is exactly what a student's node consumes there too.
+
 ### Verified camera frame
 
 `course verify` asserts optical z = forward, x = right, y = down. The two original bugs were a
@@ -164,12 +177,11 @@ one simulation. `run.sh` therefore uses bridge networking, a per-user `GZ_PARTIT
 
 ## 7. Next, in order
 
-1. **Ground truth for scoring.** Bridging `gz.msgs.Pose_V` → `tf2_msgs/TFMessage` produces empty
+1. **YOLO11n node** against `/camera/image_raw`, publishing detections. The TF chain is now
+   complete, so a detection can be turned straight into a map-frame position.
+2. **Ground truth for scoring.** Bridging `gz.msgs.Pose_V` → `tf2_msgs/TFMessage` produces empty
    `frame_id`/`child_frame_id`, so link names are lost. Needs a small node reading
    `/world/course_world/pose/info` over gz-transport directly.
-2. **`map -> base_link` TF from MAVROS.** Not published yet; the geolocation chain needs it.
-   MAVROS's `local_position` plugin has `tf/send`, off by default — needs a params file.
-3. **YOLO11n node** against `/camera/image_raw`.
 4. **The scenario**: a driving ground target on a scripted route, with the difficulty tiers from
    the course document (stationary → straight → turning → with a detector blackout).
 5. **Scoring script** reading ground truth, plus the blackout injector.
@@ -178,7 +190,6 @@ one simulation. `run.sh` therefore uses bridge networking, a per-user `GZ_PARTIT
 ## 8. Open issues
 
 - Ground truth link names lost in the bridge (blocks scoring).
-- `map -> base_link` not published.
 - `/mavros/gimbal_control/manager/pitchyaw` returns DENIED regardless of control acquisition.
   Worked around by not using it; documented in the spike notes, not fixed.
 - Gimbal residual pointing error 0.3° single-axis, 1.1–1.4° on a combined move. Acceptable for
