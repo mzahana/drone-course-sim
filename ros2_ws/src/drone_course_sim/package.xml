@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>drone_course_sim</name>
+  <version>0.1.0</version>
+  <description>Simulation bringup for the Autonomous Aerial Systems course: bridges the
+  gimballed X500 into ROS 2 and publishes the TF tree the perception labs depend on.</description>
+  <maintainer email="mohamedashraf123@gmail.com">Mohamed Abdelkader</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>ros_gz_image</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>mavros</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <export><build_type>ament_cmake</build_type></export>
+</package>
