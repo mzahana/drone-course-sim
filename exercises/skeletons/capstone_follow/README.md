@@ -62,13 +62,17 @@ you on the simulator's compass rather than on your work.
 
 | tier | on station | estimate RMS | kept in frame | automated total |
 |---|---|---|---|---|
-| 0 stationary | 99% | 3.3 m | 99% | 80 / 85 |
-| 1 out and back | 45% | 1.3 m | 97% | 68 / 85 |
-| 2 corners and stops | 66% | 2.6 m | 83% | 67 / 85 |
+| 0 stationary | 100% | 1.8 m | 99% | 84.8 / 85 |
+| 1 out and back | 45% | 1.9 m | 96% | 67.6 / 85 |
+| 2 corners and stops | 71% | 1.5 m | 97% | 75.9 / 85 |
+| 3 plus blackouts | 51% | 4.3 m | 85% | 55.7 / 85 |
 
-Tier 1 scores lowest on station because the U-turns swing the standoff point through a wide arc
-faster than the aircraft can follow it. Beating these numbers is possible and is worth saying so
-in your report.
+Tier 1 scores *lower than tier 2*, which is not a mistake: its 180° U-turns swing the standoff
+point through a wider arc, faster, than tier 2's 90° corners at half speed. Tier 3 is the only
+tier where the estimate itself degrades — a blackout is the one thing a filter cannot see
+through, only coast through.
+
+Beating these numbers is possible, and saying by how much belongs in your report.
 
 ## Rules
 

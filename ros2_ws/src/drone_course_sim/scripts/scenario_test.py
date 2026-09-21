@@ -134,6 +134,19 @@ class ScenarioTest(Node):
             self.check(moved > 3.0, "target responds to cmd_vel",
                        f"moved {moved:.1f} m in 6 s at 3 m/s")
 
+            # Put it back. The blackout check below needs the target in view,
+            # and 18 m of driving takes it out of the frame of an aircraft
+            # sitting on the ground -- which failed the recovery check for
+            # reasons that had nothing to do with blackouts.
+            print("  returning the target ...")
+            cmd.linear.x = -3.0
+            end = time.monotonic() + 6.0
+            while rclpy.ok() and time.monotonic() < end:
+                self.pub_cmd.publish(cmd)
+                rclpy.spin_once(self, timeout_sec=0.05)
+            self.pub_cmd.publish(Twist())
+            self.spin(2.0)
+
         # 6. blackout silences detection
         print("\n  testing blackout ...")
         before = self.vehicle_hits

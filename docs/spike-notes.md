@@ -263,6 +263,11 @@ failed for reasons that had nothing to do with detection. All routes are now bou
 also drove *away* from the drone, because it spawns facing it and `linear.x` is body-frame
 forward.
 
+**19a. A test that moves the world must put it back.** The scenario check drives the target for
+six seconds to prove `cmd_vel` works, which moves it 17 m — out of the frame of an aircraft
+sitting on the ground, so the blackout-recovery check that follows found nothing and failed for
+reasons that had nothing to do with blackouts. It now drives the target back before continuing.
+
 **19. A test that depends on a route is not a test.** The scenario check now runs with `tier:=-1`
 (route idle) and commands the target itself, so "does the target move" is deterministic rather
 than a question of when the test happened to start relative to the route.
@@ -351,12 +356,24 @@ nothing: measured, detections went to zero the moment the aircraft arrived over 
 truck in plain sight. Hold the *current bearing* at the standoff distance instead — which is what
 the course document said all along.
 
-**28. The target was running the drone over.** Spawned 15 m ahead facing the aircraft, and driven
-forward in its own body frame, the truck drove straight through the spawn point and shoved the
-drone 13 m across the field before it could take off. Tiers 2 and 3 then scored as if the
-follower had failed, when in fact it had been hit by a truck. The target now spawns facing away
-and waits 20 s for the aircraft to climb. **Two bugs that produce the same symptom will be
-diagnosed as one**, and this one hid behind the detector problem for three test runs.
+**28. The target was running the drone over, and the obvious fix broke something else.** Spawned
+15 m ahead facing the aircraft, and driven forward in its own body frame, the truck drove
+straight through the spawn point and shoved the drone 13 m across the field before it could take
+off. Tiers 2 and 3 then scored as if the follower had failed, when in fact it had been hit by a
+truck. **Two bugs that produce the same symptom will be diagnosed as one**, and this one hid
+behind the detector problem for three test runs.
+
+Turning it to face *away* fixed the collision and broke the thirty-second ground check: from the
+ground the drone then sees only the truck's rear, a dark open bed at a grazing angle, and the
+detector finds nothing. `course test` caught it immediately, which is exactly what that check is
+for. Broadside (yaw 90°) satisfies both — the target drives across the aircraft's nose rather
+than at it, and broadside is the easiest aspect for the detector: confidence went from 0.60 to
+**0.81**.
+
+That aspect effect is worth carrying into the course, because it has a consequence nobody
+expects: a follower sits *behind* its target, so it spends its whole flight looking at the rear
+of a vehicle, which is the aspect the detector is worst at. **Aspect matters as much as angle,
+and the guidance law knows about neither.**
 
 **29. EKF2's yaw is 5–6° off truth, and it is not ours.** Chased properly before being accepted:
 5.0° with PX4's stock magnetic field, 6.2° with the field rotated to the declination PX4's own

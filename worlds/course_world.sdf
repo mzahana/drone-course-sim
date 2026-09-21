@@ -125,13 +125,22 @@
     <include>
       <uri>model://course_target_vehicle</uri>
       <name>course_target_vehicle</name>
-      <!-- Yaw 0: the target drives AWAY from the aircraft, along +x.
-           Facing the other way, it drove straight through the spawn point and
-           shoved the drone 13 m across the field before it could take off,
-           after which the aircraft was too far behind to ever acquire it, and
-           tiers 2 and 3 scored as if the follower had failed when in fact it
-           had been run over. -->
-      <pose>15 0 0 0 0 0</pose>
+      <!-- Yaw 90 degrees: broadside to the aircraft, and driving across its
+           nose rather than at it.
+
+           Two things had to be true at once. Facing the aircraft, the target
+           drove straight through the spawn point and shoved the drone 13 m
+           across the field before it could take off, after which the aircraft
+           was too far behind to ever acquire it and tiers 2 and 3 scored as if
+           the follower had failed. Facing away fixed that and broke something
+           else: from the ground the drone then sees only the truck's rear, a
+           dark open bed at a grazing angle, and the detector finds nothing at
+           all. `course test` caught it, which is what that check is for.
+
+           Broadside satisfies both. It is also the easiest aspect for the
+           detector, which is what the thirty-second "does perception work"
+           check wants, and the target drives along +y, clear of the drone. -->
+      <pose>15 0 0 0 0 1.5707963267949</pose>
     </include>
 
   </world>

@@ -82,15 +82,58 @@ remember to activate in every terminal.
 
 ```
 docker/
-  Dockerfile          the image
-  Makefile            build helpers
-  scripts/
-    px4_deps.sh       PX4 SITL build dependencies
-    entrypoint.sh     sources ROS, PX4 paths and the student workspace
-install.sh            host-side setup
-run.sh                start / re-enter the container
-docs/                 validation notes
+  Dockerfile              the image; every lab-breaking condition is guarded here
+  scripts/course          the course CLI (see below)
+  scripts/px4_deps.sh     PX4 SITL build dependencies
+  scripts/entrypoint.sh   sources ROS, PX4 paths and the student workspace
+models/                   the course aircraft, gimbal and ground target, vendored
+worlds/course_world.sdf   the course world
+px4/airframes/            the course airframe, with the SITL-only parameters
+ros2_ws/src/
+  drone_course_sim/       given infrastructure: bridges, TF, detector, gimbal,
+                          route driver, scoring. Pre-built into the image
+exercises/
+  INTERFACES.md           the frozen interface contract. Read this first
+  skeletons/              what `course new` installs -- GENERATED, do not edit
+  solutions/              the reference solutions; edit these
+  readmes/                per-lab instructions, copied into each skeleton
+  make_skeletons.py       regenerates the skeletons from the solutions
+docs/
+  prework.md              what students do before Day 1
+  troubleshooting.md      indexed by the error message they will actually see
+  hardware-checklist.md   bench and field checks for the real aircraft
+  field-procedure.md      roles, limits, abort criteria for the flight session
+  syllabus.md             the fellowship-facing description
+  spike-notes.md          every gotcha and what it cost. Read before debugging
+install.sh                host-side setup
+run.sh                    start / re-enter the container
+PROGRESS.md               build status and session handoff
 ```
+
+**The skeletons are generated, never hand-maintained.** Two copies of a file with different
+bodies is how a lab ends up with a skeleton that cannot become the solution it is graded
+against, and nobody notices until the class. Edit `exercises/solutions/`, then run
+`python3 exercises/make_skeletons.py`; the image build runs it too and fails if it drifts.
+
+## The course CLI
+
+Everything a student needs is one command.
+
+| Command | What it does |
+|---|---|
+| `course doctor` | Verifies the whole stack. Start here when anything looks wrong |
+| `course init` | Creates the workspace in the shared volume |
+| `course sim` | PX4 SITL + Gazebo with the course aircraft |
+| `course bringup [tier:=N]` | MAVROS, the gz bridges, TF, the detector, the target route |
+| `course verify` | Asserts `map -> base_link -> camera_optical_frame` is correct |
+| `course test` | Eight end-to-end checks: camera, detector, target, blackout |
+| `course new lab4` | Scaffolds a lab skeleton into the shared volume. Never overwrites |
+| `course solution 4` | Installs the reference alongside, as a separate package |
+| `course score` | Grades a running mission against Gazebo ground truth |
+| `course rviz` | RViz with the course layout already configured |
+| `course qgc` | QGroundControl |
+| `course desktop` | Browser desktop, for machines with no working X11 |
+| `course log` | Copies the newest PX4 log somewhere the host can reach |
 
 ## Building it yourself
 

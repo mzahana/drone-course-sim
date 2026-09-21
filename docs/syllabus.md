@@ -65,10 +65,12 @@ Helpful but **not** required, and taught where needed:
   pre-work; the essentials are taught at the start of Day 3.
 - Any prior flying or drone-building experience.
 
-**Hardware:** a laptop with at least 4 cores, 8 GB of memory and 20 GB of free disk running
-Ubuntu Linux, or Windows 10/11 with WSL2. A graphics card is **not** needed — the vision software
-runs fast enough on an ordinary processor (22–26 milliseconds per image). Students on Apple
-Silicon Macs must contact the instructor before Day 1.
+**Hardware:** a laptop with at least 4 cores, 8 GB of memory and 20 GB of free disk, running
+Ubuntu Linux or Windows 10/11 with WSL2. A graphics card is **not** needed — the vision software
+runs fast enough on an ordinary processor (42 milliseconds per image at the resolution the course
+uses). Graphics drivers are not a barrier either: the environment carries its own desktop that
+students open in a web browser. Students on Apple Silicon Macs should contact the instructor
+before Day 1 — the software runs, but under processor emulation that makes the simulator slow.
 
 ---
 
@@ -193,6 +195,10 @@ a lab:
 Runs are graded at four difficulty levels, so a team that only succeeds against a slow,
 straight-line target still scores meaningfully:
 
+Runs are graded against fixed numbers — the drone should sit **18 m behind the target at 12 m
+altitude**, and counts as on station when it is within **8 m** of that — so every team is measured
+the same way and can check its own score while it works.
+
 | Level | Target behaviour | What it exposes |
 |---|---|---|
 | 0 | Stationary | Does the whole loop close at all |
@@ -234,13 +240,21 @@ objective, repeatable, and visible to the students while they work.
 **Software environment (provided as one pre-built download)**
 
 - Ubuntu 24.04 · ROS 2 Jazzy · Gazebo Harmonic simulator · PX4 v1.17 · MAVROS
+- QGroundControl v4.4.4, the standard ground-station software, already installed
 - Ultralytics YOLO11n object detector, with its trained weights already included
-- A course command-line tool — `course doctor`, `course sim`, `course bringup`, `course verify`,
-  `course test` — that checks the environment, starts everything, and self-tests
+- A course command-line tool that checks the environment, starts everything, self-tests, hands
+  out the lab exercises and their reference solutions, and grades a run
+- A **browser-based desktop**, so a student whose laptop graphics do not cooperate opens a web
+  page instead and loses nothing. Nobody is blocked on Day 1 by their own machine.
 - A simulated world containing the aircraft, its gimballed camera and a driving ground vehicle,
-  with a scoring script that grades a run automatically
+  with a scoring script that grades a run automatically against the simulator's true positions
 
 **Students provide** a laptop meeting the specification in §3. A graphics card is not required.
+
+The four in-class lab exercises are handed out as skeleton programs with the structure in place
+and the interesting parts left blank, so students spend their lab time on the idea rather than on
+boilerplate. Reference solutions are released after each lab and install **alongside** a student's
+own version rather than replacing it, so the two can be run and compared.
 
 ---
 

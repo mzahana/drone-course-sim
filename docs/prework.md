@@ -93,8 +93,9 @@ If that prints a "Hello from Docker!" paragraph, Docker is working. If it says
 
 ## 4. NVIDIA GPU — only if you have one
 
-**You do not need a GPU.** YOLO11n runs at **22–26 ms per frame on CPU** at 640 px, and the
-detector is throttled to 10 Hz anyway, so the CPU path has headroom. Every lab and the entire
+**You do not need a GPU.** On CPU, YOLO11n runs at **22–26 ms per frame at 640 px** and **42 ms
+at the course default of 960 px**, and the detector is throttled to 10 Hz either way, so the CPU
+path has headroom. Every lab and the entire
 capstone are designed around CPU inference. If `nvidia-smi` is not a command on your machine,
 skip this whole section — you are not missing anything.
 

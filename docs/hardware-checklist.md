@@ -111,7 +111,13 @@ with a hand on the battery connector.
 - [ ] Flight-mode switch assignments confirmed and read out loud: which position is Position
       mode, which is Altitude/Stabilized, which is **Return**, and which is the **kill** switch.
 - [ ] Battery failsafe thresholds set and understood.
-- [ ] RC-loss and data-link-loss actions set — see `field-procedure.md` §RC and link loss.
+- [ ] RC-loss and data-link-loss actions set — see `field-procedure.md` §6.
+- [ ] **`COM_RC_IN_MODE` is 0** and **`NAV_DLL_ACT` is not 0.** The simulation airframe sets
+      `COM_RC_IN_MODE 4` and `NAV_DLL_ACT 0` so that a headless SITL session with no transmitter
+      and no ground station can arm. On a real aircraft the first means **the pilot cannot take
+      over** and the second disables the data-link failsafe. Read both back and say the values
+      out loud. If anyone has been copying parameters from a simulation session, this is where it
+      is caught.
 - [ ] Geofence parameters set and read out loud. See `field-procedure.md` for the values.
 - [ ] Home position sets when the aircraft gets a fix.
 

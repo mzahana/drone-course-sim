@@ -105,9 +105,10 @@ build (~5 min); touching only `ros2_ws/` or `docker/scripts/` is seconds.
 | TF `map -> base_link -> camera_optical_frame` | **done**, full chain asserted by `course verify` |
 | Gimbal control from ROS topics | **done** — angle, rate, watchdog |
 | Ground truth for scoring | **done** — `/target/ground_truth`, `/drone/ground_truth` |
-| YOLO11n detector on the camera stream | **done**, 22-26 ms/frame on CPU |
+| YOLO11n detector on the camera stream | **done**, 42 ms/frame on CPU at 960 px |
 | Moving ground target + scenario tiers | **done**, 8/8 end-to-end checks pass |
 | Detector blackout injector | **done** |
+| Reference solutions for every lab and the capstone | **done**, flown and scored |
 | Scoring script | **done**, `course score`, validated at tiers 0-3 |
 | Lab skeletons and solutions | **done**, generated from the solutions |
 | QGroundControl in the image | **done**, v4.4.4, extracted not run |
@@ -180,14 +181,19 @@ neither testable nor teachable. Measured after the fix, the target circulates wi
 
 ```
   ok   map -> camera_optical_frame resolves
-  ok   camera publishing                    [243 frames]
-  ok   detector publishing                  [136 messages]
-  ok   detector FINDS the target vehicle    [272 hits, best conf 0.60]
+  ok   camera publishing                    [268 frames]
+  ok   detector publishing                  [118 messages]
+  ok   detector FINDS the target vehicle    [118 hits, best conf 0.81]
   ok   ground truth odometry available
-  ok   target responds to cmd_vel           [moved 13.0 m in 6 s at 3 m/s]
+  ok   target responds to cmd_vel           [moved 17.1 m in 6 s at 3 m/s]
   ok   blackout silences detection          [0 hits during blackout]
-  ok   detection recovers after blackout
+  ok   detection recovers after blackout    [13 hits after]
 ```
+
+It has since earned its keep twice over. It caught the target-facing change that made the
+detector blind from the ground, and it caught its own bug: driving the target for six seconds to
+prove `cmd_vel` works moves it 17 m, out of frame, so the blackout-recovery check that followed
+failed for reasons that had nothing to do with blackouts. It now puts the target back first.
 
 Run it with `tier:=-1` so the test owns `/target/cmd_vel`. The detection check is the one that
 matters: every other check can pass while the detector quietly sees nothing, and the first person
@@ -204,7 +210,9 @@ Course-provided infrastructure — students consume `/detections`, they do not w
 | `/detector/image_annotated` | `sensor_msgs/Image` | out, optional |
 | `/detector/blackout` | `std_msgs/Float64` | in — seconds to go blind |
 
-22-26 ms per frame for YOLO11n at 640 on CPU, throttled to 10 Hz. It **drops** frames rather
+**42 ms per frame at `imgsz=960`, conf 0.20**, throttled to 10 Hz. Not 640: at 640 a target
+64 px tall in a 1280-wide frame letterboxes down to ~32 px, YOLO finds no vehicle at all, and
+reports an *aeroplane* at 0.73 instead. 640 costs 25 ms and is worthless from the air. It **drops** frames rather
 than queueing them: a backlog produces detections describing where the target used to be.
 Detections carry the image's stamp and frame, never the clock's.
 
@@ -249,11 +257,21 @@ detector, not the geometry, chooses the look angle.** That is the course's "how 
 determines how you are allowed to fly" lesson, with numbers, and it is why the standoff is 18 m
 behind rather than 12.
 
-Scores at the end, 180 s runs, reference solution:
+Scores at the end, 180-second runs, reference solution:
 
-```
-tier 1   time on station 45%   estimate RMS 1.28 m (present 99%)   in frame 97%   67.6 / 85
-```
+| tier | on station | estimate RMS | kept in frame | automated total |
+|---|---|---|---|---|
+| 0 stationary | 100% | 1.8 m | 99% | 84.8 / 85 |
+| 1 out and back | 45% | 1.9 m | 96% | 67.6 / 85 |
+| 2 corners and stops | 71% | 1.5 m | 97% | 75.9 / 85 |
+| 3 plus blackouts | 51% | 4.3 m | 85% | 55.7 / 85 |
+
+The gradient is the right shape. Tier 0 is nearly full marks, as "does the loop close at all"
+should be. Tier 1 scores *lower than tier 2*, which is not a mistake: its 180-degree U-turns
+swing the standoff point through a wider arc, faster, than tier 2's 90-degree corners at half
+speed. And tier 3 is the only one where the estimate degrades at all -- RMS 4.3 m against 1.5-1.9
+elsewhere -- because a blackout is the one thing a filter cannot see through, only coast through.
+Every tier is a pass, none is a walkover, and all four are beatable.
 
 ### `map -> base_link`, and why MAVROS does not publish it
 

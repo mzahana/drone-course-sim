@@ -570,8 +570,12 @@ Three possibilities, in order of likelihood:
 3. **The target is out of range.** Every route is a bounded loop and the target circulates within
    about 35 m of its start, so if you are far from the world origin you will see nothing.
 
+4. **The look angle is too steep, or the inference size is too small.** See the two entries
+   below — between them they account for most "the detector sees nothing" reports.
+
 The detector reports the classes `person`, `car`, `truck`, `bus`, `motorcycle` at confidence
-≥ 0.35 by default. Check `detection.results[0].hypothesis.class_id` before trusting a box.
+≥ **0.20** and `imgsz` **960** by default. Check `detection.results[0].hypothesis.class_id`
+before trusting a box.
 
 ### The detector finds nothing from the air, or reports an `airplane`
 
@@ -658,8 +662,10 @@ docker rm -f drone-course && ./run.sh
 
 ### Inference is slow / `no CUDA — inference will run on CPU`
 
-Expected and fine. YOLO11n is **22–26 ms per frame at 640 px on CPU**, and the detector is
-throttled to 10 Hz. The default image ships the CPU PyTorch build deliberately.
+Expected and fine. On CPU, YOLO11n is **22–26 ms per frame at 640 px** and **42 ms at the course
+default of 960**, and the detector is throttled to 10 Hz either way, so there is headroom. The
+default image ships the CPU PyTorch build deliberately. Do not drop `imgsz` back to 640 to buy
+speed you do not need — see the entry above for what it costs you.
 
 ---
 

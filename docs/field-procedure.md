@@ -89,16 +89,19 @@ wrong or the aircraft is wrong — resolve it on the ground.
 | Geofence radius from home | **60 m** | PX4 geofence (`GF_MAX_HOR_DIST`) |
 | Geofence action | **Hold** (PIC then recovers manually) | `GF_ACTION` |
 | Altitude floor for the autonomous task | **10 m AGL** | the student mission node's clamp |
-| Commanded standoff behind the target | **8 m** | the student guidance node |
-| Commanded follow altitude | **15 m AGL** | the student guidance node |
+| Commanded standoff behind the target | **18 m** | the student guidance node |
+| Commanded follow altitude | **12 m AGL** | the student guidance node |
 | Maximum commanded ground speed | **5 m/s** | the student guidance node's clamp |
 | Minimum distance from any person | **30 m** | procedure — the flight plan, not a parameter |
 
 > **TODO:** these are the values the course is written to; **set and verify the PX4 `GF_*`
-> parameters on the actual aircraft and record the values here before the day.** The simulation's
-> scoring node defaults are a 120 m radius, a 5 m altitude floor, a 15 m follow altitude and an
-> 8 m standoff — the field radius and floor are deliberately tighter than the sim's, because the
-> field is smaller than the world and the ground is real.
+> parameters on the actual aircraft and record the values here before the day.**
+>
+> The standoff and altitude match what `course score` grades against in simulation: **18 m
+> standoff, 12 m altitude, 8 m on-station tolerance**, so a team flies the field with the same
+> numbers they tuned against. The geofence radius and the altitude floor are the two that
+> deliberately do **not** match the simulator's 120 m and 5 m: the field is smaller than the
+> world, and the ground is real.
 
 Two rules that are not parameters:
 
@@ -115,6 +118,13 @@ Two rules that are not parameters:
 - [ ] `hardware-checklist.md` sections 1–3 complete, **bench test passed, props off**.
 - [ ] Site brief delivered (section 2), roles assigned, everybody has said their role back.
 - [ ] Limits (section 3) read out and confirmed against the aircraft's parameters.
+- [ ] **Simulation-only parameters confirmed ABSENT.** The SITL airframe sets
+      `COM_RC_IN_MODE 4` (stick input disabled) and `NAV_DLL_ACT 0` (no data-link-loss action) so
+      that a headless simulation can arm with no transmitter and no ground station. **Neither may
+      ever be on the real aircraft**: the first one means the pilot cannot take over, and the
+      second disables the data-link failsafe. Read both back in QGroundControl and say the values
+      out loud. `COM_RC_IN_MODE` must be **0**, and `NAV_DLL_ACT` must be whatever section 6 says
+      it is.
 - [ ] Laptop ready, telemetry link tested, logging ready to start.
 
 ### 4.2 Set-up
@@ -142,6 +152,9 @@ No autonomous flight ever happens on the first take-off of the day.
 - [ ] Fresh, checked battery. Repeat the "ready to fly" list — `hardware-checklist.md` §6.
 - [ ] Operator starts the onboard nodes and confirms, out loud: detector running, gimbal
       responding, TF resolving, MAVROS connected, **`use_sim_time` false**.
+- [ ] Operator confirms the guidance node is commanding **18 m standoff at 12 m AGL**, the same
+      numbers the team tuned in simulation, and that no node subscribes to a `ground_truth`
+      topic — those exist only in the simulator.
 - [ ] Target person/vehicle in position, briefed, inside the fence.
 - [ ] PIC arms and takes off **manually** to the working altitude in Position mode.
 - [ ] PIC stabilises the hover, then announces: "handing over, offboard on my switch".
@@ -238,6 +251,10 @@ Read these out at the brief so nobody is surprised by an aircraft that starts fl
 > **TODO:** confirm and record the actual `NAV_RCL_ACT`, `NAV_DLL_ACT`, `COM_RC_LOSS_T` and the
 > battery failsafe parameters set on the aircraft, and correct this table to match. **The table
 > must describe the aircraft, not the intention.**
+>
+> **Do not carry the simulation's values across.** The SITL airframe sets `COM_RC_IN_MODE 4` and
+> `NAV_DLL_ACT 0` purely so a headless simulation with no transmitter and no ground station can
+> arm. On the real aircraft those two settings would delete the top two rows of this table.
 
 Two things everyone must know by heart:
 
@@ -256,7 +273,9 @@ you do not have, and the Day 4 analysis and the capstone evidence are built from
 1. Power the aircraft on the bench with **props off**, connect QGroundControl.
 2. **Analyze Tools → Log Download**, download the ULog for the run.
 3. File it as `YYYY-MM-DD_run<N>_<pilot>_<task>.ulg`.
-4. Open it in Flight Review — the same tool used in Day 2's Lab 2 — and look at, at minimum:
+4. Open it in Flight Review (<https://review.px4.io>) — the same tool and the same workflow as
+   Day 2's log lab, where `course log` pulls the SITL log out of PX4's build tree for you — and
+   look at, at minimum:
    attitude and rate tracking, vibration, actuator outputs, battery voltage and current under
    load, and the mode-change timeline against the abort you called.
 
