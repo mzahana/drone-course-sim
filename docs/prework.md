@@ -11,7 +11,7 @@ The course is 12 contact hours across 4 sessions of 3 hours. **Nothing installs 
 Day 1 opens with a working stack on every laptop, and the first lab (Lab 0) assumes you can
 already run `course doctor` and get a clean result.
 
-The image is about **3.4 GB to download** and about **13 GB on disk** once unpacked. On
+The image is about **3.7 GB to download** and about **14 GB on disk** once unpacked. On
 conference wifi, with thirty people pulling at once, that is not a ten-minute job. A student who
 arrives with nothing installed spends the first hour of Day 1 downloading instead of flying —
 **a third of Day 1, and it is not recoverable.**
@@ -145,7 +145,7 @@ git clone <repo-url> && cd drone-course-sim
    — which is the name `run.sh` looks for;
 4. warns you if there is less than 20 GB free where Docker keeps its images.
 
-The pull is the long part: **about 3.4 GB down, about 13 GB on disk after unpacking.** Start it
+The pull is the long part: **about 3.7 GB down, about 14 GB on disk after unpacking.** Start it
 on a connection you trust and leave it. Check you have the space first:
 
 ```bash

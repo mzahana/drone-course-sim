@@ -43,7 +43,7 @@ always *which layer is this?*
 | **Project demonstration** | 1 h | **TODO:** a short fifth meeting, or an asynchronous submission |
 
 **The pre-work is mandatory and it is checked.** The whole software environment is distributed as
-a single pre-built download (about 3.4 GB to download, about 13 GB installed) so that **nothing is
+a single pre-built download (about 3.7 GB to download, about 14 GB installed) so that **nothing is
 installed during class**. Class time is too short to spend on installation, and a student who
 arrives without it loses roughly a third of Day 1. The instructions are in `prework.md` and end
 with a checklist and a one-command self-test.
@@ -268,6 +268,6 @@ own version rather than replacing it, so the two can be run and compared.
   learning outcomes but must be planned in advance rather than decided on the day.
   **TODO:** confirm the site and the permissions.
 - **The pre-work download must be possible on the students' own connections.** If any student
-  cannot download 3.4 GB before Day 1, arrange a USB copy in advance.
+  cannot download 3.7 GB before Day 1, arrange a USB copy in advance.
 - All safety procedures are written down and are followed on the day: `hardware-checklist.md` and
   `field-procedure.md`.

@@ -33,7 +33,7 @@ elif docker image inspect "${IMAGE}" >/dev/null 2>&1; then
     docker tag "${IMAGE}" "${LOCAL_TAG}"
 else
     echo "  ..    pulling ${IMAGE}"
-    echo "        About 3.4 GB to download and about 13 GB on disk. Once."
+    echo "        About 3.7 GB to download and about 14 GB on disk. Once."
     if docker pull "${IMAGE}"; then
         docker tag "${IMAGE}" "${LOCAL_TAG}"
     else

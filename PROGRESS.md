@@ -91,7 +91,7 @@ docker exec dc-test bash -c 'source /opt/ros/jazzy/setup.bash; \
     source /opt/course_ws/install/setup.bash; course verify'
 ```
 
-**Build takes ~10 min** from cold on the PX4 layers. Image is ~3.4 GB to download, **~13 GB on
+**Build takes ~10 min** from cold on the PX4 layers. Image is ~3.7 GB to download, **~14 GB on
 disk**. Iterating on anything that touches `models/`, `px4/` or the PX4 clone re-triggers the PX4
 build (~5 min); touching only `ros2_ws/` or `docker/scripts/` is seconds.
 

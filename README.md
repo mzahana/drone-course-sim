@@ -143,5 +143,5 @@ cd docker && make build
 
 Students should **pull** rather than build — the build takes a while.
 
-**Disk**: about 3.4 GB to download, but roughly **13 GB on disk** once unpacked. Tell students
+**Disk**: about 3.7 GB to download, but roughly **14 GB on disk** once unpacked. Tell students
 to have the space free before the first session.
