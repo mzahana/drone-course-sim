@@ -270,3 +270,119 @@ than a question of when the test happened to start relative to the route.
 **20. The self-containment and XML guards keep paying for themselves.** Adding a fifth model cost
 nothing to validate: both guards were already wired to fail the build, and the new model was
 covered by extending two lists.
+
+---
+
+# Step 7 — making the capstone actually fly
+
+The reference solution was written, flown against ground truth and scored. The first honest score
+was **13.3 / 85**; it is now **66–80 / 85** depending on tier. Nothing in between was a typo.
+Every one of these was invisible from reading the code and obvious from one measurement, which is
+the whole argument for having a scoring script before having an opinion.
+
+**21. PX4 will not arm in headless SITL, and will not say why.** Every arming request came back
+`Arming denied: Resolve system health failures first`, which names no cause. Two separate
+requirements were failing:
+
+* no RC transmitter — PX4 reports the missing receiver as a health failure. `COM_RC_IN_MODE = 4`
+  ("manual control disabled") clears it.
+* no ground station — `rcAndDataLinkCheck.cpp` makes a live GCS connection an *arming
+  requirement* whenever `NAV_DLL_ACT` is non-zero, and the PX4 SITL default is 2. MAVROS on the
+  onboard link does not count as a GCS. `NAV_DLL_ACT = 0` clears it.
+
+Both are now defaults in the course airframe, both are clearly marked simulation-only, and both
+are Day 2 teaching material: the reason they had to be set is precisely what the failsafe lecture
+is about. Finding this took an hour, most of it spent reading PX4 source to discover that the
+message is generic by design.
+
+**22. `imgsz=640` is the wrong default and it fails silently.** The detector's input size, not
+the camera resolution, decides whether anything is found. A target 64 px tall in a 1280-wide
+frame letterboxes down to ~32 px — exactly YOLO's recall cliff — and the model finds **no
+vehicle at all**, confidently reporting an *aeroplane* at 0.73 instead. Measured on a real course
+frame:
+
+| imgsz | inference | best vehicle detection |
+|---|---|---|
+| 640 | 25 ms | nothing |
+| 800 | 34 ms | truck 0.28 |
+| **960** | **42 ms** | **truck 0.58** |
+| 1120 | 59 ms | truck 0.47 |
+| 1280 | 66 ms | truck 0.38 |
+
+The build now fails if the detector cannot find a vehicle in a **frame taken from the air at the
+course geometry**, not merely in a stock sample image. A model that detects buses on a street and
+nothing from a drone passes the old guard and breaks the lab.
+
+**23. Detection confidence collapses toward nadir.** Measured at 960 px, aircraft at 12 m:
+
+| look-down | 30° | 40° | 45° | 50° | 55° | 60° | 70° |
+|---|---|---|---|---|---|---|---|
+| truck confidence | 0.49 | 0.51 | 0.40 | 0.27 | 0.13 | none | none |
+
+COCO contains almost no vehicles photographed from above. **The detector chooses the flight
+geometry**, which is why the capstone stands off 18 m at 12 m altitude (34°) rather than the 45°
+the error model alone would prefer. The shallower look costs accuracy — 1/sin θ is 1.80 rather
+than 1.41 — and that is the right trade, because an accurate fix you never get is worth nothing.
+
+**24. Guessing a sign convention costs more than measuring it.** `yaw_sign` in the gimbal pointer
+was a guess and it was backwards, so the pointer drove the target *out* of frame and FOLLOW
+lasted nine seconds. One measurement settled it: command +0.25 rad/s for 2 s, the gimbal moves
++23.5°, and the image content moves **353 px left**. Positive yaw pulls the image left, so a
+target right of centre needs positive yaw. Two minutes of experiment, and the answer is now
+written down next to the parameter.
+
+**25. A pointer that only reacts to pixels never looks back.** Lose one frame and the gimbal
+holds its last angle forever, so a momentary dropout becomes a permanently lost target. The fix
+is the best argument for the Kalman filter in the whole course: project the filter's *prediction*
+into the optical frame and it yields exactly the quantity the pixels would have —
+`atan2(x, z)` and `atan2(y, z)` are the pixel errors divided by the focal length — so it feeds
+the same PID with the same signs, and nothing downstream knows which source it came from.
+
+**26. The velocity field of `PositionTarget` is a feedforward, not a control law.** Sending
+`v_T + Kp·e` there doubles the loop gain, because PX4 computes its own proportional term from the
+position setpoint you are already sending, with `MPC_XY_P` (0.95 by default). Measured: the
+aircraft ran 5 m past a stationary target, put it behind the camera, and lost it. The field
+carries `v_T` and nothing else. The lag experiment is unaffected and still honest — the
+steady-state lag without feedforward is `v_T / MPC_XY_P`.
+
+**27. "Hold overhead" is the wrong fallback for a stopped target.** It throws away the look angle
+the entire error model is built on, and it puts the camera at nadir where the detector sees
+nothing: measured, detections went to zero the moment the aircraft arrived over a stationary
+truck in plain sight. Hold the *current bearing* at the standoff distance instead — which is what
+the course document said all along.
+
+**28. The target was running the drone over.** Spawned 15 m ahead facing the aircraft, and driven
+forward in its own body frame, the truck drove straight through the spawn point and shoved the
+drone 13 m across the field before it could take off. Tiers 2 and 3 then scored as if the
+follower had failed, when in fact it had been hit by a truck. The target now spawns facing away
+and waits 20 s for the aircraft to climb. **Two bugs that produce the same symptom will be
+diagnosed as one**, and this one hid behind the detector problem for three test runs.
+
+**29. EKF2's yaw is 5–6° off truth, and it is not ours.** Chased properly before being accepted:
+5.0° with PX4's stock magnetic field, 6.2° with the field rotated to the declination PX4's own
+geo lookup returns, and **5.9° with stock PX4, the stock x500 and the stock world** — no course
+assets involved. It is the largest term in the geolocation error budget, because a yaw error
+rotates the bearing ray about the vertical: about 0.1 × ground range of lateral error, 1.6 m at
+the capstone geometry, more than the gimbal, the pixel and the box centre combined. It is wired
+into the course rather than hidden: the scoring thresholds allow for it and the Day 3 error
+budget names attitude as the dominant term, which is also true on the real aircraft.
+
+**30. A detection box is centred on the vehicle, not on its footprint.** The box centre sits
+about half the vehicle's height above the ground it stands on, so a ray aimed at it
+systematically over-ranges. At 15 m and 45° that was 0.6 m of a 1.2 m total error, and it does
+not average out. Intersect the plane at `z = ground + target_height/2` instead: one line.
+
+**31. Measure the model before trusting it.** The vendored pickup mesh has its length along its
+own **+Y** in inches, so dropped in unrotated it sat broadside to the direction
+`VelocityControl` drives it — the target drove sideways across the world, heading permanently
+90° from its velocity. Since the whole guidance law is built on the target's direction of travel,
+that is not cosmetic. The collision box said 5.4 m along X and the mesh said 5.66 m along Y, and
+neither complained about the other.
+
+**32. Do not "fix" something you have not reproduced.** The camera appeared to be staring at the
+aircraft's own landing leg, so the gimbal was moved forward — which put the lens *inside* the
+airframe and made every frame a close-up blur. A proper measurement afterwards (hover, sweep the
+pitch from 30° to 70°, count dark pixels) showed **0–1.7% obstruction at every angle**: the
+original mount was fine, and the blocked frame had been captured during a transient bank. The
+move was reverted. The build-time check that the URDF and SDF mount offsets agree was kept,
+because that one is worth having either way.

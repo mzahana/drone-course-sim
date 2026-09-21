@@ -28,13 +28,29 @@
       </inertial>
 
       <collision name="collision">
-        <pose>0 0 0.9 0 0 0</pose>
+        <pose>0 0 0.93 0 0 0</pose>
         <geometry>
-          <box><size>5.4 2.0 1.8</size></box>
+          <box><size>5.66 2.47 1.86</size></box>
         </geometry>
       </collision>
 
+      <!-- The mesh is modelled with the vehicle's LENGTH along its own +Y and
+           its nose toward +Y, in inches. Dropped in unrotated, the truck sits
+           broadside to the direction VelocityControl drives it: linear.x is the
+           model's +X, so the target drove sideways across the world, its
+           heading permanently 90 degrees from its velocity.
+
+           That is not a cosmetic problem. The whole guidance law is built on
+           the target's direction of travel, and a target whose body points one
+           way while it moves another makes the standoff reference and anything
+           a student infers from the image disagree by a right angle.
+
+           Rotating by -90 degrees about Z puts the nose on +X, where the
+           collision box, the drive direction and the picture finally agree.
+           Measured mesh extents (converted from inches): 2.47 wide, 5.66 long,
+           1.86 tall, bottom on the ground. -->
       <visual name="visual">
+        <pose>0 0 0 0 0 -1.5707963267949</pose>
         <geometry>
           <mesh><uri>meshes/pickup.dae</uri></mesh>
         </geometry>

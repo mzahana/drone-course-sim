@@ -4,6 +4,20 @@
     <include merge='true'>
       <uri>model://course_x500</uri>
     </include>
+    <!-- Mounted on the centreline. Moving it forward was tried, to keep the
+         aircraft's own landing legs out of frame at steep look-down angles,
+         and made things worse: at x = 0.15 the lens ends up inside the
+         airframe and every frame is a close-up blur.
+
+         The legs only enter the picture when the gimbal is pitched past about
+         60 degrees down, and the guidance law no longer asks for that: it
+         holds a 45 degree look angle, where the view is clear. If a steeper
+         look is ever needed, move the gimbal DOWN rather than forward, and
+         check a frame before believing it.
+
+         The rotation is left alone regardless: PX4's gimbal control depends on
+         these joint signs, and flipping the mount silently inverts commanded
+         yaw and roll. -->
     <include merge='true'>
       <uri>model://course_gimbal</uri>
       <pose>0 0 0.26 0 0 3.14159265358979</pose>
@@ -12,5 +26,24 @@
       <parent>base_link</parent>
       <child>cgo3_mount_link</child>
     </joint>
+
+    <!-- Ground truth for scoring. NEVER for flight: nothing like it exists on
+         the real aircraft, so any mission that reads it cannot transfer.
+
+         This is deliberately an OdometryPublisher rather than a bridge of
+         /world/course_world/pose/info. Bridging gz.msgs.Pose_V to
+         tf2_msgs/TFMessage drops frame_id and child_frame_id, so the link
+         names, the only thing that makes the poses identifiable, are lost.
+         One plugin per model we want to score is both simpler and typed.
+
+         dimensions must be 3: the default is 2, which silently reports a
+         flying aircraft's altitude as zero. -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>course_world</odom_frame>
+      <robot_base_frame>x500_course_gimbal</robot_base_frame>
+      <dimensions>3</dimensions>
+      <odom_publish_frequency>50</odom_publish_frequency>
+    </plugin>
   </model>
 </sdf>

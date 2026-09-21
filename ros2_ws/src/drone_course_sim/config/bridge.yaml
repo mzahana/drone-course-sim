@@ -71,3 +71,12 @@
   ros_type_name: "nav_msgs/msg/Odometry"
   gz_type_name: "gz.msgs.Odometry"
   direction: GZ_TO_ROS
+
+# --- aircraft ground truth ---------------------------------------------------
+# Same rule as the target's: scoring only, never flight. Compare a student's
+# estimate against this; never feed it to a controller.
+- ros_topic_name: "/drone/ground_truth"
+  gz_topic_name: "/model/x500_course_gimbal_0/odometry"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS

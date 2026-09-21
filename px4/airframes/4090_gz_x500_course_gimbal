@@ -27,3 +27,26 @@ param set-default MNT_MAN_YAW 3
 param set-default MNT_RANGE_ROLL 180
 param set-default MNT_RANGE_PITCH 180
 param set-default MNT_RANGE_YAW 720
+
+# There is no RC transmitter in headless SITL, and PX4 reports the missing RC
+# receiver as a system health failure -- which makes every arming request come
+# back "Arming denied: Resolve system health failures first". The message names
+# no cause, so this costs an hour the first time somebody meets it.
+#
+# COM_RC_IN_MODE 4 is "stick input disabled": the autopilot stops expecting a
+# transmitter at all. It is a SIMULATION default and must not be copied to the
+# real aircraft, where the RC link is a safety device and its loss failsafe is
+# part of the Day 2 material.
+param set-default COM_RC_IN_MODE 4
+
+# NAV_DLL_ACT is the data-link-loss failsafe action, and PX4 makes a live GCS
+# connection an ARMING REQUIREMENT whenever it is non-zero
+# (rcAndDataLinkCheck.cpp: "To arm, at least a data link or RC must be
+# present"). The PX4 SITL default is 2 (Return), and MAVROS on the onboard
+# link does not count as a ground station -- so with no RC and no QGroundControl
+# running, every arming request is refused with the unhelpfully generic
+# "Arming denied: Resolve system health failures first", naming no cause.
+#
+# Also a SIMULATION default. On the real aircraft both the RC link and the
+# data link are safety devices and their loss actions are Day 2 material.
+param set-default NAV_DLL_ACT 0

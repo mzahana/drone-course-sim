@@ -32,9 +32,9 @@ architecture is identical anyway.)
 | Throwaway PX4 clone used for inspecting airframes/models | `~/src/drone_courses/spike/PX4-Autopilot` (1.8 GB, deletable) |
 
 The course design document holds the session plan, the theory broken into six teachable steps,
-the given-vs-written split, the scoring rubric, and the mini-project catalogue. **Slides do not
-exist yet** — deliberately, because they are downstream of facts only a working stack can
-establish.
+the given-vs-written split, the scoring rubric, and the mini-project catalogue. The **slides**
+live at `~/src/drone_courses/slides` — a Beamer theme, a shared TikZ figure library and one deck
+per day; `make` builds all four. Read `slides/STYLE.md` before editing any of them.
 
 Reusable packages that exist elsewhere on this machine and are meant to be pulled in later:
 `mav_navigator_ros` (flight state machine + trajectory planner), `mav_controllers_ros`
@@ -62,10 +62,18 @@ docker build -t drone-course-sim:jazzy -f docker/Dockerfile .   # context is the
 Inside the container:
 
 ```bash
-course doctor     # verifies everything; start here if anything looks wrong
-course sim        # PX4 SITL + Gazebo with the course aircraft
-course bringup    # MAVROS + gz bridges + TF tree   (second terminal)
-course verify     # asserts the camera optical frame is correct
+course doctor        # verifies everything; start here if anything looks wrong
+course sim           # PX4 SITL + Gazebo with the course aircraft
+course bringup       # MAVROS + gz bridges + TF tree   (second terminal)
+course verify        # asserts the camera optical frame is correct
+course test          # end-to-end scenario check
+course new lab4      # scaffold a lab skeleton into the shared volume
+course solution 4    # reveal the reference solution
+course score         # grade a running mission against ground truth
+course qgc           # QGroundControl
+course desktop       # browser desktop, for machines with no working X11
+course rviz          # RViz with the course layout
+course log           # copy the newest PX4 log into the shared volume
 ```
 
 Test recipe used throughout development (headless, isolated, no GUI needed):
@@ -96,13 +104,15 @@ build (~5 min); touching only `ros2_ws/` or `docker/scripts/` is seconds.
 | Camera into ROS (`/camera/image_raw`, `camera_info`) | **done**, ~25 Hz |
 | TF `map -> base_link -> camera_optical_frame` | **done**, full chain asserted by `course verify` |
 | Gimbal control from ROS topics | **done** — angle, rate, watchdog |
-| Ground truth for scoring | **blocked** — bridge drops link names |
+| Ground truth for scoring | **done** — `/target/ground_truth`, `/drone/ground_truth` |
 | YOLO11n detector on the camera stream | **done**, 22-26 ms/frame on CPU |
 | Moving ground target + scenario tiers | **done**, 8/8 end-to-end checks pass |
 | Detector blackout injector | **done** |
-| Scoring script | not started |
-| Lab skeletons and solutions | not started |
-| Beamer slides | not started |
+| Scoring script | **done**, `course score`, validated at tiers 0-3 |
+| Lab skeletons and solutions | **done**, generated from the solutions |
+| QGroundControl in the image | **done**, v4.4.4, extracted not run |
+| Browser desktop fallback (noVNC) | **done**, `course desktop` |
+| Beamer slides | **done**, 4 decks, 279 slides |
 
 ## 6. Done, with the reasoning that is expensive to re-derive
 
@@ -211,6 +221,40 @@ The build runs a **detector self-test** against a baked sample image and fails i
 fewer than 3 objects. A weights file that loads but returns nothing is otherwise a silent failure
 that surfaces mid-lab.
 
+### The capstone actually flies: what it took, and why each thing mattered
+
+The reference solution was written, run against ground truth, and scored. The first honest
+score was **13.3 / 85**. Getting to **67.6 / 85** took six separate defects, every one of which
+was invisible from reading the code and obvious from one measurement. They are listed because
+each is also a lesson the course now teaches.
+
+| What was wrong | How it showed up | Fix |
+|---|---|---|
+| Detector ran at `imgsz=640` | A target 64 px tall in a 1280-wide frame is 32 px after letterboxing, right on YOLO's recall cliff. It reported an **aeroplane** at 0.73 and no vehicle at all | `imgsz=960`: truck at 0.58 for 42 ms |
+| Gimbal `yaw_sign` was a guess, and wrong | The pointer drove the target *out* of frame; FOLLOW lasted 9 s | Measured: +23.5° of yaw moves the image content 353 px left, so the sign is **+1** |
+| Pointer only reacted to pixels | One lost frame became a lost target for good, because nothing ever looked back | It now falls back to the filter's prediction, projected into the optical frame, feeding the same PID |
+| Guidance sent `Kp·e` as the velocity *feedforward* | PX4 adds its own position P term, so the gain was double: the aircraft ran 5 m past a stationary target | The feedforward carries `v_T` only. The proportional term is PX4's `MPC_XY_P` |
+| Stationary-target fallback sat directly overhead | Nadir view; detections went to zero while hovering over a truck in plain sight | Hold the current bearing at the standoff distance, as the course document always said |
+| Look angle was 45° and drifting steeper | See the table below | 12 m up, 18 m back: a 34° look-down |
+
+**Detection confidence against look-down angle**, measured on this target at 960 px:
+
+| look-down | 30° | 40° | 45° | 50° | 55° | 60° | 70° |
+|---|---|---|---|---|---|---|---|
+| truck confidence | 0.49 | 0.51 | 0.40 | 0.27 | 0.13 | none | none |
+
+COCO contains almost no pictures of vehicles taken from above, so a near-nadir pickup is not
+something YOLO was ever taught to recognise — past 60° it reports an aeroplane instead. **The
+detector, not the geometry, chooses the look angle.** That is the course's "how well you see
+determines how you are allowed to fly" lesson, with numbers, and it is why the standoff is 18 m
+behind rather than 12.
+
+Scores at the end, 180 s runs, reference solution:
+
+```
+tier 1   time on station 45%   estimate RMS 1.28 m (present 99%)   in frame 97%   67.6 / 85
+```
+
 ### `map -> base_link`, and why MAVROS does not publish it
 
 `vehicle_tf_node` publishes it from `/mavros/local_position/pose`. MAVROS *can* publish this
@@ -243,21 +287,34 @@ one simulation. `run.sh` therefore uses bridge networking, a per-user `GZ_PARTIT
 
 ## 7. Next, in order
 
-1. **Ground truth for scoring.** Bridging `gz.msgs.Pose_V` → `tf2_msgs/TFMessage` produces empty
-   `frame_id`/`child_frame_id`, so link names are lost. Needs a small node reading
-   `/world/course_world/pose/info` over gz-transport directly.
-4. **The scenario**: a driving ground target on a scripted route, with the difficulty tiers from
-   the course document (stationary → straight → turning → with a detector blackout).
-5. **Scoring script** reading ground truth, plus the blackout injector.
-6. **Then, and only then, slides.** They depend on numbers this stack produces.
+Everything on the original list is done. What is left is rehearsal, not construction:
+
+1. **Publish the image to a registry** and set `IMAGE` in `install.sh`. Until then a student
+   machine cannot `./install.sh` — it falls back to telling them to build locally, which takes
+   half an hour.
+2. **Record the demo videos.** Every `\dcvideoplaceholder` in the decks is a recording that has
+   not been made. Never run a live demo without a recorded fallback.
+3. **Hardware rehearsal** on the real X500 V2 + A8 mini + RPi 5 / Orin, and check the Day 1
+   mass and thrust numbers against the actual airframe (see open issues).
+4. **Dry run with two test students** on clean laptops, one Linux and one Windows/WSL2.
 
 ## 8. Open issues
 
-- Ground truth link names lost in the bridge (blocks scoring).
+- **EKF2 yaw sits 5-6° off simulator truth.** Not ours: reproduced with stock PX4, the stock
+  x500 and the stock world. It is the largest single term in the geolocation error budget
+  (a yaw error rotates the bearing ray about the vertical, so ~0.1 × ground range of lateral
+  error). The scoring thresholds and the Day 3 error budget are both set with this in mind.
+  Full reasoning is in `worlds/course_world.sdf` next to the magnetic field.
+- The Day 1 deck's thrust-to-weight worked example lands at **1.79**, below the 2:1 rule the
+  same slide teaches, for the X500 V2 with an A8 mini and an Orin. The deck says so plainly
+  rather than hiding it, but the mass budget should be checked against the real airframe at the
+  hardware rehearsal.
 - `/mavros/gimbal_control/manager/pitchyaw` returns DENIED regardless of control acquisition.
   Worked around by not using it; documented in the spike notes, not fixed.
-- Gimbal residual pointing error 0.3° single-axis, 1.1–1.4° on a combined move. Acceptable for
-  now; the joint gains are where to look if tracking needs tighter pointing.
+- Gimbal residual pointing error 0.3° single-axis, 1.1–1.4° on a combined move. Acceptable; the
+  joint gains are where to look if tracking ever needs tighter pointing.
+- The `Pickup` mesh is vendored from Gazebo Fuel (Nate Koenig / Open Robotics). Attribution is
+  in `models/README.md`; its licence is not stated in the model metadata.
 
 ## 9. Conventions
 

@@ -170,6 +170,109 @@ COPY --chown=${USERNAME}:${USERNAME} ros2_ws/src/drone_course_sim ${COURSE_WS}/s
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
     && cd ${COURSE_WS} && colcon build --packages-select drone_course_sim
 
+USER root
+# --------------------------------------------------------- 5e. Ground station
+# Placed after the PX4 build on purpose. These layers are stable, so the usual
+# rule would put them early -- but PX4 takes five minutes to compile and sits
+# above them, and invalidating that to add an apt package is a bad trade. The
+# apt and pip layers that PX4 itself depends on stay where they are.
+#
+# 5e.1 QGroundControl
+# Days 1 and 2 are QGC labs, so it is baked in. The AppImage is *extracted*
+# rather than run: AppImage needs FUSE, which is not available in a container,
+# and `--appimage-extract` needs no FUSE at all. Running the AppImage directly
+# is the failure every student would otherwise hit in the first ten minutes.
+#
+# The bundled Qt does not bring its own GStreamer, X11 or audio libraries, so
+# those come from apt.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libpulse-mainloop-glib0 libsdl2-2.0-0 \
+      libxcb-xinerama0 libxcb-cursor0 libxkbcommon-x11-0 \
+      libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+      gstreamer1.0-plugins-good gstreamer1.0-libav \
+      libgstreamer-plugins-bad1.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG QGC_VERSION=v4.4.4
+RUN curl -fsSL -o /tmp/qgc.AppImage \
+      https://github.com/mavlink/qgroundcontrol/releases/download/${QGC_VERSION}/QGroundControl.AppImage \
+    && chmod +x /tmp/qgc.AppImage \
+    && cd /opt && /tmp/qgc.AppImage --appimage-extract > /dev/null \
+    && mv /opt/squashfs-root /opt/qgroundcontrol \
+    && rm /tmp/qgc.AppImage \
+    && chmod -R a+rX /opt/qgroundcontrol \
+    && printf '#!/bin/sh\nexec /opt/qgroundcontrol/AppRun "$@"\n' > /usr/local/bin/qgroundcontrol \
+    && chmod +x /usr/local/bin/qgroundcontrol \
+    && test -x /opt/qgroundcontrol/AppRun \
+    && echo "${QGC_VERSION}" > /opt/qgroundcontrol/QGC_COURSE_VERSION \
+    && su ${USERNAME} -c 'test -r /opt/qgroundcontrol/AppRun' \
+    && echo 'QGroundControl readable by the course user'
+
+# 5e.2 Web desktop fallback
+# X11 forwarding is fine on Linux and on Windows with WSLg, and it is a support
+# nightmare everywhere else. A student who cannot open a GUI cannot do Lab 0,
+# so the image carries its own X server and serves it over HTTP as a last
+# resort: `course desktop`, then http://localhost:6080/vnc.html.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xvfb x11vnc novnc websockify openbox xterm \
+    && rm -rf /var/lib/apt/lists/*
+
+# The detector self-test above proves inference works. This proves it works
+# at the geometry the COURSE actually flies -- aircraft at 15 m, looking down
+# 45 deg, target 21 m away and about 64 px tall in the frame. At the usual
+# imgsz=640 this frame yields no vehicle at all (YOLO calls it an 'airplane'),
+# so a default that looks perfectly reasonable silently breaks Lab 4 and the
+# capstone. Fail the build instead.
+USER root
+RUN python3 -c "\
+from ultralytics import YOLO; \
+m = YOLO('/opt/models/yolo11n.pt'); \
+r = m.predict('${COURSE_WS}/src/drone_course_sim/test_aerial_frame.png', \
+              imgsz=960, conf=0.25, verbose=False)[0]; \
+hits = [(m.names[int(b.cls[0])], round(float(b.conf[0]), 2)) for b in r.boxes \
+        if m.names[int(b.cls[0])] in ('car', 'truck', 'bus')]; \
+assert hits, 'detector found no vehicle in the aerial self-test frame'; \
+print('aerial detector self-test ok:', hits)"
+
+# The URDF's gimbal mount offset is a hand-copied number that must match the
+# SDF the simulator actually spawns. When they drift, every TF lookup is quietly
+# wrong by the difference and nothing anywhere reports an error -- which is how
+# a 0.24 m mount error survived into a working-looking stack once already.
+USER root
+RUN python3 -c "\
+import re, sys; \
+sdf = open('${COURSE_WS}/src/drone_course_sim/../../../..' if False else \
+           '/opt/PX4-Autopilot/Tools/simulation/gz/models/x500_course_gimbal/model.sdf').read(); \
+urdf = open('${COURSE_WS}/src/drone_course_sim/urdf/x500_course_gimbal.urdf.xacro').read(); \
+m = re.search(r'model://course_gimbal</uri>\s*<pose>([-0-9.eE]+) ([-0-9.eE]+) ([-0-9.eE]+)', sdf); \
+assert m, 'could not find the gimbal include pose in the SDF'; \
+sx, sz = float(m.group(1)), float(m.group(3)); \
+ux = float(re.search(r'name=.mount_x. value=.([-0-9.eE]+).', urdf).group(1)); \
+uz = float(re.search(r'name=.mount_z. value=.([-0-9.eE]+).', urdf).group(1)); \
+base_z = 0.24; \
+assert abs(sx - ux) < 1e-6, f'mount x differs: SDF {sx} vs URDF {ux}'; \
+assert abs((sz - base_z) - uz) < 1e-6, f'mount z differs: SDF {sz}-{base_z} vs URDF {uz}'; \
+print(f'gimbal mount agrees: x={ux}, z={uz}')"
+
+# ---------------------------------------------------------- 5d. Lab exercises
+# Skeletons and reference solutions ship inside the image, so `course new lab4`
+# works with no network and no git. The skeletons are GENERATED from the
+# solutions (exercises/make_skeletons.py), which is what stops a skeleton
+# drifting until it can no longer become the solution it is graded against --
+# so the build regenerates them and fails if they are stale.
+USER root
+COPY exercises /opt/course_exercises
+RUN cd /opt/course_exercises && python3 make_skeletons.py \
+    && for d in skeletons/*/ solutions/*/; do \
+         test -f "$d/package.xml" || { echo "missing package.xml in $d"; exit 1; }; \
+       done \
+    && python3 -c "import py_compile,glob,sys; \
+[py_compile.compile(f, doraise=True) for f in glob.glob('/opt/course_exercises/**/*.py', recursive=True)]; \
+print('exercise sources compile')" \
+    && find /opt/course_exercises -name __pycache__ -type d -exec rm -rf {} + \
+    && chmod -R a+rX /opt/course_exercises
+ENV EXERCISES=/opt/course_exercises
+
 # ---------------------------------------------------------------- 6. Entrypoint
 USER root
 COPY docker/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -191,6 +294,9 @@ ENV GZ_PARTITION=course_local \
 USER ${USERNAME}
 RUN printf '%s\n' \
       'source /opt/ros/'"${ROS_DISTRO}"'/setup.bash' \
+      '# `course desktop` writes the X display it started here, so every' \
+      '# terminal opened afterwards finds it without being told.' \
+      '[ -f /tmp/.course_display ] && export DISPLAY="$(cat /tmp/.course_display)"' \
       '[ -f /opt/course_ws/install/setup.bash ] && source /opt/course_ws/install/setup.bash' \
       '[ -f $HOME/shared_volume/ros2_ws/install/setup.bash ] && source $HOME/shared_volume/ros2_ws/install/setup.bash' \
       '' > /tmp/course_rc \

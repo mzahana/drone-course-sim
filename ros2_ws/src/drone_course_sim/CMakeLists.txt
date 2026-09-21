@@ -9,5 +9,6 @@ install(PROGRAMS
   scripts/detector_node.py
   scripts/target_route_node.py
   scripts/scenario_test.py
+  scripts/scoring_node.py
   DESTINATION lib/${PROJECT_NAME})
 ament_package()

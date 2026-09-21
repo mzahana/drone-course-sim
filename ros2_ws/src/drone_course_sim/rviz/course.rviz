@@ -1,0 +1,133 @@
+# The canned RViz layout for the perception labs.
+#
+# Fixed frame is map, and the displays are the four a student actually needs:
+# the TF tree, the annotated camera image, their own target estimate with its
+# error ellipse, and the guidance reference. Setting these up by hand costs
+# three minutes per student per lab, which is most of a lab session across a
+# cohort.
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 640
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Name: root
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 5
+      Plane Cell Count: 40
+      Color: 120; 120; 120
+      Alpha: 0.4
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Marker Scale: 2
+      Show Names: true
+      Show Axes: true
+      Show Arrows: false
+      Update Interval: 0
+    - Class: rviz_default_plugins/Image
+      Name: Detector view
+      Enabled: true
+      Topic:
+        Value: /detector/image_annotated
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+    - Class: rviz_default_plugins/Marker
+      Name: Target estimate ellipse
+      Enabled: true
+      Topic:
+        Value: /target/estimate_ellipse
+        Depth: 10
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Odometry
+      Name: Target track
+      Enabled: true
+      Topic:
+        Value: /target/track
+        Depth: 20
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Keep: 40
+      Position Tolerance: 0.5
+      Angle Tolerance: 0.5
+      Shape:
+        Alpha: 1
+        Color: 25; 200; 120
+        Head Length: 0.5
+        Head Radius: 0.4
+        Shaft Length: 1.5
+        Shaft Radius: 0.15
+        Value: Arrow
+      Covariance:
+        Value: true
+        Position:
+          Alpha: 0.3
+          Color: 204; 120; 20
+          Scale: 1
+    - Class: rviz_default_plugins/Pose
+      Name: Guidance reference
+      Enabled: true
+      Topic:
+        Value: /guidance/reference
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Shape: Arrow
+      Color: 60; 130; 220
+      Alpha: 0.9
+      Shaft Length: 2
+      Shaft Radius: 0.2
+      Head Length: 0.6
+      Head Radius: 0.45
+    - Class: rviz_default_plugins/Odometry
+      Name: Target ground truth (scoring only)
+      Enabled: false
+      Topic:
+        Value: /target/ground_truth
+        Depth: 20
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Keep: 40
+      Shape:
+        Alpha: 1
+        Color: 200; 40; 40
+        Head Length: 0.5
+        Head Radius: 0.4
+        Shaft Length: 1.5
+        Shaft Radius: 0.15
+        Value: Arrow
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 60
+      Focal Point:
+        X: 10
+        Y: 0
+        Z: 0
+      Pitch: 0.65
+      Yaw: 0.9
+      Near Clip Distance: 0.01
+Window Geometry:
+  Height: 900
+  Width: 1600
+  Displays:
+    collapsed: false

@@ -77,3 +77,20 @@ It is tempting to "clean this up". Do not. PX4's gimbal control assumes these jo
 conventions, and flipping the mount silently inverts commanded yaw and roll relative to the
 airframe. The frames are instead handled explicitly in the URDF, where they are visible and
 commented, rather than hidden in a model edit that breaks control.
+
+
+## `course_target_vehicle` — two fixes worth knowing about
+
+**The mesh is modelled with its length along its own +Y, in inches.** Dropped in unrotated, the
+truck sits broadside to the direction `VelocityControl` drives it: `linear.x` is the model's +X,
+so the target drove sideways across the world with its heading permanently 90° from its
+velocity. That is not cosmetic — the whole guidance law is built on the target's direction of
+travel, and a target whose body points one way while it moves another makes the standoff
+reference and anything a student infers from the image disagree by a right angle. The visual is
+now rotated −90° about Z, and the collision box matches the measured mesh: 5.66 × 2.47 × 1.86 m,
+bottom on the ground.
+
+**It spawns facing away from the aircraft.** Facing the other way, it drove straight through the
+drone's spawn point and shoved it 13 m across the field before it could take off — after which
+the aircraft was too far behind to ever acquire it, and tiers 2 and 3 scored as if the follower
+had failed. The route driver also waits 20 s for the aircraft to climb before setting off.

@@ -7,6 +7,27 @@
       <real_time_update_rate>250</real_time_update_rate>
     </physics>
     <gravity>0 0 -9.8</gravity>
+    <!-- PX4's stock field, deliberately unchanged.
+         EKF2's yaw in this simulator settles about 5 to 6 degrees away from
+         Gazebo truth. That was chased down properly before being accepted:
+         measured at 5.0 degrees with this field, 6.2 with the field rotated to
+         the declination PX4's own geo lookup returns, and 5.9 degrees with
+         STOCK PX4, the stock x500 and the stock world, with no course assets
+         involved at all. It is a property of PX4 v1.17 SITL, it varies a little
+         from run to run, and it is not something the course introduced or can
+         tune away from here.
+
+         What it costs is worth knowing, because it is the largest single term
+         in the geolocation error budget: a yaw error rotates the bearing ray
+         about the vertical, so a target at ground range R lands about
+         R * tan(5.5 deg) = 0.1 * R to one side. At 15 m that is 1.5 m, more
+         than the gimbal, the pixel and everything else combined.
+
+         Two consequences are wired into the course rather than hidden: the
+         scoring thresholds are set so that the achievable accuracy earns full
+         marks, and the Day 3 error budget names vehicle attitude as the
+         dominant term. Which is also true on the real aircraft, where the
+         compass is the weakest sensor on board. -->
     <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
     <atmosphere type="adiabatic"/>
     <scene>
@@ -104,7 +125,13 @@
     <include>
       <uri>model://course_target_vehicle</uri>
       <name>course_target_vehicle</name>
-      <pose>15 0 0 0 0 3.14159265358979</pose>
+      <!-- Yaw 0: the target drives AWAY from the aircraft, along +x.
+           Facing the other way, it drove straight through the spawn point and
+           shoved the drone 13 m across the field before it could take off,
+           after which the aircraft was too far behind to ever acquire it, and
+           tiers 2 and 3 scored as if the follower had failed when in fact it
+           had been run over. -->
+      <pose>15 0 0 0 0 0</pose>
     </include>
 
   </world>

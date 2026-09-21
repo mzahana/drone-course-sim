@@ -44,6 +44,12 @@ class TargetRoute(Node):
         self.declare_parameter("leg_seconds", 12.0)    # straight leg before a turn
         self.declare_parameter("turn_seconds", 6.0)
         self.declare_parameter("stop_seconds", 5.0)
+        # The target waits for the aircraft to get airborne. Without this it
+        # sets off while the drone is still climbing through 5 m, and by the
+        # time the mission reaches SEARCH the target can already be 60 m away
+        # and outside any plausible search pattern -- which looks exactly like
+        # a follower that failed, and is not.
+        self.declare_parameter("start_delay", 20.0)      # s
         self.declare_parameter("blackout_every", 25.0)
         self.declare_parameter("blackout_length", 3.0)
 
@@ -53,6 +59,7 @@ class TargetRoute(Node):
         self.leg = float(self.get_parameter("leg_seconds").value)
         self.turn = float(self.get_parameter("turn_seconds").value)
         self.stop = float(self.get_parameter("stop_seconds").value)
+        self.start_delay = float(self.get_parameter("start_delay").value)
         self.bo_every = float(self.get_parameter("blackout_every").value)
         self.bo_len = float(self.get_parameter("blackout_length").value)
 
@@ -69,7 +76,7 @@ class TargetRoute(Node):
         """Tier 1: long straight legs with a U-turn at each end."""
         u_turn = math.pi / self.turn_rate          # seconds for 180 degrees
         cycle = 2.0 * (self.leg + u_turn)
-        u = self.t % cycle
+        u = (self.t - self.start_delay) % cycle
         if u < self.leg:
             return self.speed, 0.0
         u -= self.leg
@@ -81,17 +88,24 @@ class TargetRoute(Node):
         return self.speed * 0.4, self.turn_rate
 
     def _phase(self):
-        """Tier 2+: drive, corner, drive, stop -- a bounded circuit."""
+        """Tier 2+: drive, corner, drive, stop -- a bounded circuit.
+
+        The legs are shorter than tier 1's. Each cycle turns only 90 degrees,
+        so with full-length legs the "circuit" is a square 80 m on a side and
+        the target spends most of the run outside the area the aircraft can
+        reasonably search. Measured: it reached 105 m from the origin.
+        """
+        leg = 0.6 * self.leg
         corner = (math.pi / 2.0) / self.turn_rate   # 90 degrees
-        cycle = self.leg + corner + self.leg + self.stop
-        u = self.t % cycle
-        if u < self.leg:
+        cycle = leg + corner + leg + self.stop
+        u = (self.t - self.start_delay) % cycle
+        if u < leg:
             return self.speed, 0.0
-        u -= self.leg
+        u -= leg
         if u < corner:
             return self.speed * 0.5, self.turn_rate
         u -= corner
-        if u < self.leg:
+        if u < leg:
             return self.speed, 0.0
         return 0.0, 0.0          # stopped: v_hat is undefined, on purpose
 
@@ -100,6 +114,10 @@ class TargetRoute(Node):
 
         if self.tier < 0:
             return               # idle: someone else owns /target/cmd_vel
+
+        if self.t < self.start_delay:
+            self.pub.publish(Twist())     # hold still while the aircraft climbs
+            return
 
         cmd = Twist()
         if self.tier == 0:
@@ -113,7 +131,8 @@ class TargetRoute(Node):
 
         self.pub.publish(cmd)
 
-        if self.tier >= 3 and self.t - self.last_blackout >= self.bo_every:
+        if (self.tier >= 3 and self.t > self.start_delay
+                and self.t - self.last_blackout >= self.bo_every):
             self.last_blackout = self.t
             self.pub_bo.publish(Float64(data=self.bo_len))
             self.get_logger().info(f"t={self.t:.0f}s: detector blackout {self.bo_len}s")

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>lab5_follow</name>
+  <version>1.0.0</version>
+  <description>Skeleton for Lab 5: a constant-velocity filter on the ground
+  plane, and a standoff guidance law with velocity feedforward and safety clamps.</description>
+  <maintainer email="mohamedashraf123@gmail.com">Mohamed Abdelkader</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>mavros_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

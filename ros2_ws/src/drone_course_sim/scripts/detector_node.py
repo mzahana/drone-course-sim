@@ -44,8 +44,24 @@ class Detector(Node):
         super().__init__("detector")
 
         self.declare_parameter("model", os.environ.get("YOLO_WEIGHTS", "/opt/models/yolo11n.pt"))
-        self.declare_parameter("confidence", 0.35)
-        self.declare_parameter("imgsz", 640)
+        self.declare_parameter("confidence", 0.20)
+        # 960, not the usual 640. Measured on the course scenario, with the
+        # aircraft at 15 m looking down 45 deg at the target 21 m away, where a
+        # 1.8 m target is 64 px tall in the 1280x720 frame:
+        #
+        #   imgsz   inference   best "vehicle" detection
+        #     640      25 ms    NOTHING  (it reports an 'airplane' at 0.73)
+        #     800      34 ms    truck 0.28
+        #     960      42 ms    truck 0.58     <- the knee
+        #    1120      59 ms    truck 0.47
+        #    1280      66 ms    truck 0.38
+        #
+        # At 640 the letterboxed target is about 32 px tall, which is exactly
+        # where YOLO's recall falls off a cliff -- so the default that every
+        # tutorial uses silently detects nothing from the air, and the lab looks
+        # like a frame bug rather than a resolution budget. 42 ms still fits the
+        # 10 Hz throttle with room to spare.
+        self.declare_parameter("imgsz", 960)
         self.declare_parameter("max_rate", 10.0)          # Hz
         self.declare_parameter("publish_annotated", True)
         # COCO classes worth chasing on the ground. Empty list = keep everything.

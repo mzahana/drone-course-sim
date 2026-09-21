@@ -17,6 +17,13 @@
 
   <xacro:property name="pi2" value="1.5707963267948966"/>
   <!-- Gimbal rotation centre relative to base_link. -->
+  <!-- Measured from a running simulation, not derived on paper: read the
+       link poses out of /world/course_world/pose/info and subtract base_link's.
+       The payload sits forward of and just below the airframe centre so the
+       camera does not look into a landing leg. Both numbers must track
+       models/x500_course_gimbal/model.sdf; a build-time check in the Dockerfile
+       fails if they drift apart. -->
+  <xacro:property name="mount_x" value="0.0"/>
   <xacro:property name="mount_z" value="0.02"/>
 
   <link name="base_link"/>
@@ -32,7 +39,7 @@
   <joint name="gimbal_mount_joint" type="fixed">
     <parent link="base_link"/>
     <child link="cgo3_mount_link"/>
-    <origin xyz="0 0 ${mount_z}" rpy="0 0 ${pi2*2}"/>
+    <origin xyz="${mount_x} 0 ${mount_z}" rpy="0 0 ${pi2*2}"/>
   </joint>
 
   <joint name="cgo3_vertical_arm_joint" type="revolute">   <!-- yaw -->

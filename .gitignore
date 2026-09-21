@@ -1,3 +1,7 @@
 shared_volume/
 *.log
 .spike/
+
+# Python bytecode from running the exercise sources directly
+__pycache__/
+*.pyc

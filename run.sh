@@ -28,6 +28,11 @@ fi
 
 xhost +local:docker >/dev/null 2>&1 || true
 
+if [ -z "${DISPLAY:-}" ]; then
+    echo "[run] no DISPLAY on this machine — inside the container run 'course desktop'"
+    echo "[run] and open http://localhost:${VNC_PORT:-6080}/vnc.html"
+fi
+
 # ---------------------------------------------------------------------------
 # Isolation. This matters more than it looks.
 #
@@ -50,8 +55,14 @@ if [ "${USE_HOST_NETWORK:-0}" = "1" ]; then
     NET_ARGS=(--network host)
 fi
 
+# The browser desktop needs one port out. It costs nothing when unused, and
+# publishing it after the fact means recreating the container -- which on a
+# student laptop means losing whatever they had running.
+VNC_PORT="${VNC_PORT:-6080}"
+
 docker run -it \
     --name "${NAME}" \
+    --publish "127.0.0.1:${VNC_PORT}:6080" \
     "${NET_ARGS[@]}" \
     --ipc host \
     --privileged \
