@@ -90,5 +90,22 @@
       <longitude_deg> 8.546163739800146</longitude_deg>
       <elevation>0</elevation>
     </spherical_coordinates>
+    <!--
+      The ground target the drone follows.
+
+      Placed 15 m ahead of the spawn point on purpose: with the aircraft still
+      on the ground and the gimbal neutral, the truck fills enough of the frame
+      for the detector to find it. That makes "does perception work at all" a
+      test anyone can run in thirty seconds, without flying.
+
+      The route driver moves it from here; see drone_course_sim's
+      target_route_node and its `tier` parameter.
+    -->
+    <include>
+      <uri>model://course_target_vehicle</uri>
+      <name>course_target_vehicle</name>
+      <pose>15 0 0 0 0 3.14159265358979</pose>
+    </include>
+
   </world>
 </sdf>

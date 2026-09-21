@@ -34,6 +34,10 @@ def generate_launch_description():
                         "by image timestamp silently return the wrong transform."),
         DeclareLaunchArgument("fcu_url", default_value="udp://:14540@127.0.0.1:14557"),
         DeclareLaunchArgument(
+            "tier", default_value="1",
+            description="Ground target difficulty: 0 stationary, 1 straight, "
+                        "2 turning and stopping, 3 adds detector blackouts."),
+        DeclareLaunchArgument(
             "detector", default_value="true",
             description="Run YOLO11n on the camera stream."),
 
@@ -81,6 +85,17 @@ def generate_launch_description():
             name="detector", output="screen",
             condition=IfCondition(LaunchConfiguration("detector")),
             parameters=[{"use_sim_time": use_sim_time}],
+        ),
+
+        # Drives the ground target along the route for the selected tier.
+        Node(
+            package="drone_course_sim", executable="target_route_node.py",
+            name="target_route", output="screen",
+            # value_type=int matters: a LaunchConfiguration is a string, and the
+            # node declares tier as an integer.
+            parameters=[{"use_sim_time": use_sim_time,
+                         "tier": ParameterValue(LaunchConfiguration("tier"),
+                                                value_type=int)}],
         ),
 
         # map -> base_link from the autopilot's position estimate.

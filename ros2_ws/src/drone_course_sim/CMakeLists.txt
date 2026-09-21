@@ -7,5 +7,7 @@ install(PROGRAMS
   scripts/gimbal_interface_node.py
   scripts/vehicle_tf_node.py
   scripts/detector_node.py
+  scripts/target_route_node.py
+  scripts/scenario_test.py
   DESTINATION lib/${PROJECT_NAME})
 ament_package()

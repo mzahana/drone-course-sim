@@ -10,11 +10,21 @@ the camera, or the world out from under the course material.
 | `course_x500` | The x500 quadrotor, composed from `course_x500_base` |
 | `course_gimbal` | The gimbal: CGO3 kinematics, A8-mini-like optics, joint state feedback |
 | `x500_course_gimbal` | The course aircraft: `course_x500` + `course_gimbal` |
+| `course_target_vehicle` | The ground target the drone follows |
 | `../worlds/course_world.sdf` | The world the course flies in |
 
 Every `model://` reference inside these resolves to another `course_*` asset in this repo, and
 **the image build asserts it** — if anything ever points back at a PX4 asset, the build fails
 rather than the lab.
+
+`course_target_vehicle` uses the mesh and textures of the **"Pickup"** model from Gazebo Fuel,
+by Nate Koenig (Open Robotics). The body was made dynamic, given a box collision instead of the
+full mesh, and fitted with velocity control and an odometry publisher. **Its licence is not
+stated in the model metadata and should be confirmed before this repository is made public** --
+most Open Robotics Fuel models are CC-BY 4.0, but that has not been verified here.
+
+It is a textured vehicle mesh rather than a box primitive for one reason: it has to be
+recognisable to YOLO, and COCO has no "box" class.
 
 `course_x500_base`, `course_x500` and `course_world.sdf` are derived from PX4's Gazebo models,
 BSD-3-Clause, copyright 2022 PX4 Autopilot for Drones. See `LICENSE-PX4-ASSETS`. They are

@@ -98,8 +98,9 @@ build (~5 min); touching only `ros2_ws/` or `docker/scripts/` is seconds.
 | Gimbal control from ROS topics | **done** — angle, rate, watchdog |
 | Ground truth for scoring | **blocked** — bridge drops link names |
 | YOLO11n detector on the camera stream | **done**, 22-26 ms/frame on CPU |
-| Moving ground target + scenario tiers | not started |
-| Scoring script + detector-blackout injector | not started |
+| Moving ground target + scenario tiers | **done**, 8/8 end-to-end checks pass |
+| Detector blackout injector | **done** |
+| Scoring script | not started |
 | Lab skeletons and solutions | not started |
 | Beamer slides | not started |
 
@@ -144,6 +145,43 @@ gives the make target `gz_x500_course_gimbal_course_world`. No PX4 source change
 - **Kinematic conventions deliberately unchanged**: PX4's gimbal control depends on the joint
   signs, so flipping the mount silently inverts commanded yaw and roll. Frames are handled
   explicitly in the URDF instead.
+
+### Ground target and scenario tiers
+
+`course_target_vehicle` drives a route set by `target_route_node`'s `tier` parameter:
+
+| Tier | Route | What it tests |
+|---|---|---|
+| -1 | idle, publishes nothing | lets a test or a person own `/target/cmd_vel` |
+| 0 | stationary | does the loop close at all |
+| 1 | out and back, long straights | steady-state lag -- the feedforward lesson |
+| 2 | circuit with corners and stops | gimbal saturation, staying in frame, and the degeneracy when a stopped target has no heading |
+| 3 | tier 2 plus scheduled blackouts | prediction and graceful degradation |
+
+**Every route is bounded.** The first version of tier 1 drove in a straight line forever: within
+seconds the target was hundreds of metres away, far out of detection range, and the scenario was
+neither testable nor teachable. Measured after the fix, the target circulates within about 35 m.
+
+`/target/ground_truth` (`nav_msgs/Odometry`) is the scoring signal. Never for flight.
+
+### `course test` -- the end-to-end check
+
+`course test` asserts, against a live sim, the things a lab actually depends on:
+
+```
+  ok   map -> camera_optical_frame resolves
+  ok   camera publishing                    [243 frames]
+  ok   detector publishing                  [136 messages]
+  ok   detector FINDS the target vehicle    [272 hits, best conf 0.60]
+  ok   ground truth odometry available
+  ok   target responds to cmd_vel           [moved 13.0 m in 6 s at 3 m/s]
+  ok   blackout silences detection          [0 hits during blackout]
+  ok   detection recovers after blackout
+```
+
+Run it with `tier:=-1` so the test owns `/target/cmd_vel`. The detection check is the one that
+matters: every other check can pass while the detector quietly sees nothing, and the first person
+to notice would be a student in the middle of Lab 4.
 
 ### YOLO11n detector
 
@@ -205,11 +243,7 @@ one simulation. `run.sh` therefore uses bridge networking, a per-user `GZ_PARTIT
 
 ## 7. Next, in order
 
-1. **The scenario**: a driving ground target on a scripted route, with the difficulty tiers from
-   the course document (stationary -> straight -> turning -> with a detector blackout). Until a
-   target model exists the detector has nothing to find, so this also completes the first
-   genuine end-to-end test of detect -> locate.
-2. **Ground truth for scoring.** Bridging `gz.msgs.Pose_V` → `tf2_msgs/TFMessage` produces empty
+1. **Ground truth for scoring.** Bridging `gz.msgs.Pose_V` → `tf2_msgs/TFMessage` produces empty
    `frame_id`/`child_frame_id`, so link names are lost. Needs a small node reading
    `/world/course_world/pose/info` over gz-transport directly.
 4. **The scenario**: a driving ground target on a scripted route, with the difficulty tiers from

@@ -247,3 +247,26 @@ to install after the PX4 build (so model edits stop costing a five minute rebuil
 world -- and cmake then globbed no `course_world.sdf`, so the target vanished and `course sim`
 died with `ninja: unknown target gz_x500_course_gimbal_course_world`. The airframe **and** the
 world must exist before the build; only the models can come after.
+
+
+---
+
+# Step 6 — the ground target
+
+`course test` runs 8 end-to-end checks against a live sim and all pass, including the one that
+matters: the detector really finds the target vehicle (272 hits over 20 s, best confidence 0.60).
+
+**18. A target driving in a straight line drives to infinity.** Tier 1 was "straight at 3 m/s",
+which is pedagogically right for the feedforward lesson and practically useless: the truck was at
+x = -167 m within a couple of minutes, far outside detection range, and every detection check
+failed for reasons that had nothing to do with detection. All routes are now bounded loops. It
+also drove *away* from the drone, because it spawns facing it and `linear.x` is body-frame
+forward.
+
+**19. A test that depends on a route is not a test.** The scenario check now runs with `tier:=-1`
+(route idle) and commands the target itself, so "does the target move" is deterministic rather
+than a question of when the test happened to start relative to the route.
+
+**20. The self-containment and XML guards keep paying for themselves.** Adding a fifth model cost
+nothing to validate: both guards were already wired to fail the build, and the new model was
+covered by extending two lists.

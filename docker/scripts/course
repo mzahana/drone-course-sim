@@ -45,7 +45,7 @@ doctor() {
     else bad "px4 binary not built"; fi
     [ -f "$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal" ] \
         && ok "course gimbal airframe available" || bad "course gimbal airframe missing"
-    for m in course_x500_base course_x500 course_gimbal x500_course_gimbal; do
+    for m in course_x500_base course_x500 course_gimbal x500_course_gimbal course_target_vehicle; do
         [ -d "$PX4_DIR/Tools/simulation/gz/models/$m" ] \
             && ok "model $m installed" || bad "model $m missing"
     done
@@ -103,10 +103,15 @@ verify() {
     ros2 run drone_course_sim verify_camera_frame.py
 }
 
+scenario_test() {
+    ros2 run drone_course_sim scenario_test.py
+}
+
 case "${1:-help}" in
     doctor) doctor ;;
     bringup) shift; bringup "$@" ;;
     verify) verify ;;
+    test) scenario_test ;;
     init)   init ;;
     sim)    sim ;;
     mavros) shift; mavros_up "$@" ;;
@@ -118,6 +123,7 @@ usage: course <command>
   sim       start PX4 SITL + Gazebo with the course gimbal
   bringup   start MAVROS, the gz bridges and the TF tree
   verify    check that base_link -> camera_optical_frame is correct
+  test      end-to-end scenario check (camera, detector, target, blackout)
   mavros    start MAVROS against the running SITL
 USAGE
     ;;
