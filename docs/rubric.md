@@ -271,6 +271,21 @@ without explaining why gets roughly half.
 
 ---
 
+## 5b. Recording the demo
+
+The image can record its own screen, so the demo does not need anything on your host:
+
+```bash
+course desktop                                   # if you are not using X11 forwarding
+bash $COURSE_TOOLS/media/capture.sh rec my-demo 120
+```
+
+That writes `~/media/my-demo.mp4` — 1920x1080, H.264, no mouse pointer. Record the run you are
+submitting, not a better one you did earlier, and say in the report which tier it is and what
+real-time factor the scorer reported for it.
+
+---
+
 ## 6. Running the scorer yourself
 
 ```bash

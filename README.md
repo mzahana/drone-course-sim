@@ -146,12 +146,13 @@ Everything a student needs is one command.
 | `course doctor` | Verifies the whole stack. Start here when anything looks wrong |
 | `course init` | Creates the workspace in the shared volume |
 | `course sim` | PX4 SITL + Gazebo with the course aircraft |
-| `course bringup [tier:=N]` | MAVROS, the gz bridges, TF, the detector, the target route |
+| `course bringup [N]` | MAVROS, the gz bridges, TF, the detector, the target route on tier N. Refuses to start a second copy |
+| `course stop [--all]` | Puts the stack down and checks nothing survived; `--all` stops the simulator too |
 | `course verify` | Asserts `map -> base_link -> camera_optical_frame` is correct |
 | `course test` | Eight end-to-end checks: camera, detector, target, blackout |
 | `course new lab4` | Scaffolds a lab skeleton into the shared volume. Never overwrites |
 | `course solution 4` | Installs the reference alongside, as a separate package |
-| `course score` | Grades a running mission against Gazebo ground truth |
+| `course score [N] [S]` | Grades a running mission against Gazebo ground truth: tier N, S seconds |
 | `course rviz` | RViz with the course layout already configured |
 | `course qgc` | QGroundControl |
 | `course desktop` | Browser desktop, for machines with no working X11 |

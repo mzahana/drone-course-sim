@@ -228,8 +228,16 @@ RUN curl -fsSL -o /tmp/qgc.AppImage \
 # nightmare everywhere else. A student who cannot open a GUI cannot do Lab 0,
 # so the image carries its own X server and serves it over HTTP as a last
 # resort: `course desktop`, then http://localhost:6080/vnc.html.
+#
+# ffmpeg, imagemagick, xdotool and wmctrl come with it. They are what
+# tools/media/capture.sh uses to make the course's own screenshots and clips,
+# and -- more to the point -- the capstone is marked partly on a demo
+# recording. A student asked for a demo who then has to install a screen
+# recorder on the host, outside the container where the thing they are
+# demonstrating runs, will submit a phone video of a monitor.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       xvfb x11vnc novnc websockify openbox xterm \
+      ffmpeg imagemagick xdotool wmctrl x11-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # The detector self-test above proves inference works. This proves it works
@@ -287,6 +295,21 @@ print('exercise sources compile')" \
     && find /opt/course_exercises -name __pycache__ -type d -exec rm -rf {} + \
     && chmod -R a+rX /opt/course_exercises
 ENV EXERCISES=/opt/course_exercises
+
+# The measurement and media tools. These are not student material, but they
+# have to be IN the image: the look-angle rig is where the flight geometry in
+# the slides comes from, and a measurement that cannot be re-run inside the
+# same container it was taken in is not a measurement anyone can check.
+COPY tools /opt/course_tools
+RUN chmod -R a+rX /opt/course_tools \
+    && python3 -c "import py_compile,glob; \
+[py_compile.compile(f, doraise=True) for f in glob.glob('/opt/course_tools/**/*.py', recursive=True)]; \
+print('tools compile')" \
+    && for f in /opt/course_tools/media/capture.sh /opt/course_tools/media/make_media.sh; do \
+         bash -n "$f" || { echo "syntax error in $f"; exit 1; }; \
+       done \
+    && find /opt/course_tools -name __pycache__ -type d -exec rm -rf {} +
+ENV COURSE_TOOLS=/opt/course_tools
 
 # ---------------------------------------------------------------- 6. Entrypoint
 USER root

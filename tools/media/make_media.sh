@@ -19,8 +19,19 @@ WS="$HOME/shared_volume/ros2_ws"
 mkdir -p "$MEDIA"
 
 # Restart the simulator and bring the stack up on a given route tier.
+#
+# `course stop --all` rather than a hand-rolled pkill: the camera bridge is a
+# separate executable and a cleanup that misses it leaves a publisher behind
+# on /camera/image_raw. Twenty-nine of those accumulated once (spike note 40)
+# and every clip recorded afterwards was of a simulator being strangled.
 fresh() {          # fresh TIER
-    bash ~/restart.sh
+    course stop --all > /dev/null 2>&1
+    sleep 5
+    ( export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+      export __GLX_VENDOR_LIBRARY_NAME=nvidia
+      cd /opt/PX4-Autopilot && nohup script -qc \
+        "make px4_sitl gz_x500_course_gimbal_course_world" /tmp/sim.log \
+        > /dev/null 2>&1 & )
     sleep 50
     nohup course bringup "tier:=$1" > /tmp/bringup.log 2>&1 &
     sleep 35
@@ -86,7 +97,8 @@ m_offboard() {
 
 # The console, for the two clips that are really about what PX4 prints.
 m_first_run() {
-    bash ~/restart.sh
+    course stop --all > /dev/null 2>&1
+    sleep 5
     $CAP term 'cd /opt/PX4-Autopilot && course sim' 150 42
     $CAP rec course-sim-first-run 75
 }
@@ -97,7 +109,8 @@ m_first_run() {
 # question -- so the clip is of someone typing it and reading the flags, not
 # of a tidy prepared screen.
 m_ekf2() {
-    bash ~/restart.sh
+    course stop --all > /dev/null 2>&1
+    sleep 5
     $CAP term 'cd /opt/PX4-Autopilot && make px4_sitl gz_x500_course_gimbal_course_world' 150 42
     sleep 60
     $CAP rec-bg ekf2-status 95 > /dev/null
