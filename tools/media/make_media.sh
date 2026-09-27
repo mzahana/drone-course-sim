@@ -38,8 +38,11 @@ fresh() {          # fresh TIER
 }
 
 capstone() {       # capstone TIER
+    # colcon's setup.bash reads unbound variables, so -u must be off for it
+    set +u
     # shellcheck disable=SC1090
     source "$WS/install/setup.bash"
+    set -u
     nohup ros2 launch capstone_follow_solution capstone.launch.py "tier:=$1" \
         > /tmp/capstone.log 2>&1 &
 }
@@ -55,10 +58,38 @@ m_capstone() {
     $CAP gazebo-gui
     capstone 2
     sleep 25                       # through TAKEOFF and into FOLLOW
-    $CAP follow x500_course_gimbal_0 -12 -8 6
+    # Close. The first version of this shot used a -14,-9,7 offset and the
+    # aircraft came out twelve pixels across -- you could not see that it had
+    # a gimbal, let alone which way the gimbal was pointing, which is the
+    # entire subject of the clip.
+    $CAP follow x500_course_gimbal_0 -7 -5 3
     sleep 3
     $CAP rec capstone-follow 150
     $CAP frame /detector/image_annotated detector-follow
+}
+
+# The aircraft itself, close enough to see what it is made of. These are the
+# stills for Day 1 -- "this is the machine" -- and no amount of wide shot of
+# a field substitutes for them.
+m_closeups() {
+    fresh 0
+    $CAP gazebo-gui
+    # On the ground: three-quarter front, then a low angle that puts the
+    # gimbal and the lens against the sky.
+    $CAP closeup 0 0 0.30  1.7  135 14 ; sleep 2 ; $CAP shot drone-three-quarter
+    $CAP closeup 0 0 0.28  1.2  175  4 ; sleep 2 ; $CAP shot drone-gimbal
+    $CAP closeup 0 0 0.30  2.4   45 30 ; sleep 2 ; $CAP shot drone-from-above
+    # In flight, with the gimbal pointed at the target: the geometry the whole
+    # course is about, in one frame.
+    capstone 0
+    sleep 45
+    $CAP follow x500_course_gimbal_0 -3 -2 1.2
+    sleep 4
+    $CAP shot drone-in-flight
+    $CAP follow x500_course_gimbal_0 -16 -11 8
+    sleep 4
+    $CAP shot standoff-geometry
+    $CAP frame /detector/image_annotated detector-annotated
 }
 
 # What the detector is looking at while that happens, and the estimate with
@@ -68,7 +99,7 @@ m_rviz() {
     fresh 2
     capstone 2
     sleep 40
-    $CAP rviz rviz-follow
+    $CAP rviz rviz-follow full
 }
 
 # The blackout. Recorded in RViz for the same reason: the interesting thing is
@@ -79,15 +110,18 @@ m_blackout() {
     sleep 40
     course rviz > /tmp/rviz.log 2>&1 &
     sleep 15
-    $CAP rec detector-blackout 100
+    $CAP rec detector-blackout 100 full
 }
 
 # Lab 3: the OFFBOARD square, which is the first thing a student flies.
 m_offboard() {
     fresh 0
     $CAP gazebo-gui
+    # colcon's setup.bash reads unbound variables, so -u must be off for it
+    set +u
     # shellcheck disable=SC1090
     source "$WS/install/setup.bash"
+    set -u
     nohup ros2 run lab3_offboard_solution offboard_square.py \
         > /tmp/lab3.log 2>&1 &
     sleep 8
@@ -100,7 +134,7 @@ m_first_run() {
     course stop --all > /dev/null 2>&1
     sleep 5
     $CAP term 'cd /opt/PX4-Autopilot && course sim' 150 42
-    $CAP rec course-sim-first-run 75
+    $CAP rec course-sim-first-run 75 full
 }
 
 # EKF2's own view of itself, typed into the PX4 console. `ekf2 status` is the
@@ -113,7 +147,7 @@ m_ekf2() {
     sleep 5
     $CAP term 'cd /opt/PX4-Autopilot && make px4_sitl gz_x500_course_gimbal_course_world' 150 42
     sleep 60
-    $CAP rec-bg ekf2-status 95 > /dev/null
+    $CAP rec-bg ekf2-status 95 full > /dev/null
     sleep 3
     $CAP type 'ekf2 status'      ; sleep 14
     $CAP type 'ekf2 status'      ; sleep 12
@@ -125,18 +159,19 @@ m_ekf2() {
 
 m_qgc() {
     fresh 1
-    $CAP qgc qgc-connected
+    $CAP qgc qgc-connected full
 }
 
 case "${1:-help}" in
     capstone)  m_capstone ;;
+    closeups)  m_closeups ;;
     rviz)      m_rviz ;;
     blackout)  m_blackout ;;
     offboard)  m_offboard ;;
     firstrun)  m_first_run ;;
     ekf2)      m_ekf2 ;;
     qgc)       m_qgc ;;
-    all)       for t in capstone rviz blackout offboard qgc firstrun; do
+    all)       for t in closeups capstone rviz blackout offboard qgc firstrun; do
                    echo "=== $t ==="; "m_${t/firstrun/first_run}"; done ;;
     *) sed -n '2,10p' "${BASH_SOURCE[0]}" ;;
 esac

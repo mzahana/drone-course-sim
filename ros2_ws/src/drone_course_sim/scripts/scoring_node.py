@@ -39,8 +39,6 @@ import sys
 import time
 
 import rclpy
-from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
@@ -143,38 +141,25 @@ class Scorer(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-        # A reentrant group and a multi-threaded executor.
-        #
-        # Honest history: this was added on a wrong diagnosis. The node had
-        # recorded zero mission states across a whole run, and callback
-        # starvation looked like the explanation -- it subscribes to two 50 Hz
-        # odometries, /tf, /tf_static and the camera info alongside a 2 Hz
-        # status string. The real cause was twenty-nine leaked camera bridges
-        # saturating the machine (spike note 40), and this changed nothing.
-        #
-        # It is kept because it is still the right shape for a node that must
-        # sample on a timer while high-rate topics arrive: a scorer that drops
-        # samples because it was busy transforming a pose is measuring itself.
-        # It is not load-bearing. Do not treat it as a fix for anything.
-        self.cbg = ReentrantCallbackGroup()
-        self.create_subscription(Odometry, "/target/ground_truth", self._truth_t, SENSOR_QOS,
-                                 callback_group=self.cbg)
-        self.create_subscription(Odometry, "/drone/ground_truth", self._truth_d, SENSOR_QOS,
-                                 callback_group=self.cbg)
+        # Single-threaded, deliberately. A multi-threaded executor with a
+        # reentrant group was tried here and removed: it lets _sample run
+        # concurrently with the callbacks that write the state it reads, so
+        # the scorer races against its own inputs. A grader has to be
+        # deterministic before it is fast -- the same run must produce the
+        # same mark twice.
+        self.create_subscription(Odometry, "/target/ground_truth", self._truth_t, SENSOR_QOS)
+        self.create_subscription(Odometry, "/drone/ground_truth", self._truth_d, SENSOR_QOS)
         self.create_subscription(PoseWithCovarianceStamped, "/target/estimate",
-                                 self._estimate, 10,
-                                 callback_group=self.cbg)
+                                 self._estimate, 10)
         # A team may publish the filtered track instead of the raw locate.
-        self.create_subscription(Odometry, "/target/track", self._track, 10, callback_group=self.cbg)
-        self.create_subscription(CameraInfo, "/camera/camera_info", self._cam, SENSOR_QOS,
-                                 callback_group=self.cbg)
-        self.create_subscription(String, "/mission/state", self._state, 10, callback_group=self.cbg)
-        self.create_subscription(Float64, "/detector/blackout", self._blackout, 10, callback_group=self.cbg)
+        self.create_subscription(Odometry, "/target/track", self._track, 10)
+        self.create_subscription(CameraInfo, "/camera/camera_info", self._cam, SENSOR_QOS)
+        self.create_subscription(String, "/mission/state", self._state, 10)
+        self.create_subscription(Float64, "/detector/blackout", self._blackout, 10)
         self.create_subscription(
             Int32, "/target/route_tier", self._route_tier,
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
-                       reliability=ReliabilityPolicy.RELIABLE),
-            callback_group=self.cbg)
+                       reliability=ReliabilityPolicy.RELIABLE))
 
         # accumulators
         self.n = 0
@@ -205,8 +190,7 @@ class Scorer(Node):
         # where the answer is always 1.0 and cannot be negotiated.
         self.wall0 = time.monotonic()
 
-        self.timer = self.create_timer(self.period, self._sample,
-                               callback_group=self.cbg)
+        self.timer = self.create_timer(self.period, self._sample)
         self.get_logger().info(
             f"scoring for {self.duration:.0f} s -- standoff {self.d:.1f} m, "
             f"altitude {self.h:.1f} m, tolerance {self.station_tol:.1f} m")
@@ -489,10 +473,8 @@ class Scorer(Node):
 def main():
     rclpy.init()
     node = Scorer()
-    ex = MultiThreadedExecutor(num_threads=4)
-    ex.add_node(node)
     try:
-        ex.spin()
+        rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     return 0

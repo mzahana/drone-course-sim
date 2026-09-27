@@ -10,6 +10,7 @@
 #
 #   course desktop
 #   bash tools/media/capture.sh gazebo-gui        # swap in the recording GUI
+#   bash tools/media/capture.sh closeup X Y Z R AZ EL   # frame the aircraft
 #   bash tools/media/capture.sh shot NAME         # one frame
 #   bash tools/media/capture.sh rec  NAME SECONDS # video
 #   bash tools/media/capture.sh term 'course sim' # a terminal running something
@@ -21,6 +22,14 @@
 set -uo pipefail
 
 MEDIA="${MEDIA:-$HOME/media}"
+# The Gazebo render area inside a 1920x1080 window: everything below the
+# toolbars, left of the entity tree, above the playback buttons.
+#
+# Cropping rather than configuring. `gz sim -g --gui-config` with a
+# scene-only layout is the tidier idea and it did not take -- the stock
+# panels came back regardless -- and a deterministic crop is worth more here
+# than a clean solution that silently does not apply.
+GZ_CROP="${GZ_CROP:-1500x860+0+148}"
 export DISPLAY="${DISPLAY:-:99}"
 CLEAN_GUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gui_clean.config"
 mkdir -p "$MEDIA"
@@ -68,6 +77,34 @@ look_at() {   # look_at X Y Z QX QY QZ QW
       >/dev/null 2>&1
 }
 
+# Park the camera a few metres off the aircraft and look at it. For the
+# stills that have to SHOW the hardware -- the gimbal under the nose, the
+# props, the lens pointing down -- rather than show it flying.
+#
+# Gazebo's camera looks down its own +x, so aiming it means a quaternion, and
+# the arithmetic is fiddly enough by hand that it belongs here once.
+closeup() {   # closeup TX TY TZ  RANGE  AZIMUTH_DEG  ELEVATION_DEG
+    python3 - "$@" <<'PYEOF'
+import math, subprocess, sys
+tx, ty, tz, rng, az, el = (float(v) for v in sys.argv[1:7])
+a, e = math.radians(az), math.radians(el)
+x = tx - rng * math.cos(e) * math.cos(a)
+y = ty - rng * math.cos(e) * math.sin(a)
+z = tz + rng * math.sin(e)
+yaw, pitch = a, e                       # look back along the same ray
+cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+q = (-sy * sp, cy * sp, sy * cp, cy * cp)
+subprocess.run(["gz", "service", "-s", "/gui/move_to/pose",
+                "--reqtype", "gz.msgs.GUICamera", "--reptype", "gz.msgs.Boolean",
+                "--timeout", "3000",
+                "--req", f"pose: {{position: {{x: {x}, y: {y}, z: {z}}}, "
+                         f"orientation: {{x: {q[0]}, y: {q[1]}, z: {q[2]}, w: {q[3]}}}}}"],
+               capture_output=True)
+print(f"camera at {x:.1f} {y:.1f} {z:.1f}, {rng:.0f} m from target")
+PYEOF
+}
+
 follow() {    # follow MODEL  DX DY DZ
     gz service -s /gui/follow --reqtype gz.msgs.StringMsg --reptype gz.msgs.Boolean \
       --timeout 3000 --req "data: \"$1\"" >/dev/null 2>&1
@@ -76,10 +113,16 @@ follow() {    # follow MODEL  DX DY DZ
       --req "x: $2, y: $3, z: $4" >/dev/null 2>&1
 }
 
+# shot NAME [full]  -- cropped to the Gazebo render area unless 'full'
 shot() {
     park_pointer
     sleep 1
-    import -window root "$MEDIA/$1.png"
+    if [ "${2:-}" = "full" ]; then
+        import -window root "$MEDIA/$1.png"
+    else
+        import -window root /tmp/_shot_full.png
+        convert /tmp/_shot_full.png -crop "$GZ_CROP" +repage "$MEDIA/$1.png"
+    fi
     echo "$MEDIA/$1.png"
 }
 
@@ -87,13 +130,17 @@ rec() {
     local name="$1" secs="${2:-60}"
     park_pointer
     # -draw_mouse 0 so a stray pointer never lands in the middle of a demo.
-    # CRF 20 at 25 fps: a 3-minute clip is about 50 MB, which is small enough
-    # to live in a repository and good enough to project.
-    ffmpeg -y -f x11grab -draw_mouse 0 -framerate 25 -video_size 1920x1080 \
-        -i "${DISPLAY}.0" -t "$secs" \
-        -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p \
+    # 1280x720 at CRF 24: a three-minute clip lands near 15 MB instead of 50,
+    # which is the difference between a repository you can clone on conference
+    # wifi and one you cannot. It is still more resolution than a projector.
+    local size="${GZ_CROP%%+*}" off="${GZ_CROP#*+}"
+    [ "${3:-}" = "full" ] && { size="1920x1080"; off="0+0"; }
+    ffmpeg -y -f x11grab -draw_mouse 0 -framerate 25 \
+        -video_size "$size" -i "${DISPLAY}.0+${off/+/,}" -t "$secs" \
+        -vf scale=1280:-2 \
+        -c:v libx264 -preset medium -crf 24 -pix_fmt yuv420p -movflags +faststart \
         "$MEDIA/$name.mp4" > "/tmp/ffmpeg_$name.log" 2>&1
-    echo "$MEDIA/$name.mp4"
+    echo "$MEDIA/$name.mp4 ($(du -h "$MEDIA/$name.mp4" | cut -f1))"
 }
 
 # A terminal, for the clips that are really about what the console says.
@@ -114,9 +161,12 @@ term() {      # term "command to run"  [cols] [rows]
 rec_bg() {
     local name="$1" secs="${2:-60}"
     park_pointer
-    ffmpeg -y -f x11grab -draw_mouse 0 -framerate 25 -video_size 1920x1080 \
-        -i "${DISPLAY}.0" -t "$secs" \
-        -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p \
+    local size="1920x1080" off="0+0"
+    if [ "${3:-}" != "full" ]; then size="${GZ_CROP%%+*}"; off="${GZ_CROP#*+}"; fi
+    ffmpeg -y -f x11grab -draw_mouse 0 -framerate 25 \
+        -video_size "$size" -i "${DISPLAY}.0+${off/+/,}" -t "$secs" \
+        -vf scale=1280:-2 \
+        -c:v libx264 -preset medium -crf 24 -pix_fmt yuv420p -movflags +faststart \
         "$MEDIA/$name.mp4" > "/tmp/ffmpeg_$name.log" 2>&1 &
     echo $!
 }
@@ -153,6 +203,7 @@ case "${1:-help}" in
     rviz)   shift; rviz_shot "$@" ;;
     qgc)    shift; qgc_shot "$@" ;;
     look)   shift; look_at "$@" ;;
+    closeup) shift; closeup "$@" ;;
     term)   shift; term "$@" ;;
     frame)  shift; python3 "$(dirname "${BASH_SOURCE[0]}")/grab_topic.py" \
                 "${1:-/detector/image_annotated}" "$MEDIA/${2:-detector}.png" "${3:-20}" ;;
