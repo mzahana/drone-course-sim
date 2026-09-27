@@ -72,6 +72,19 @@ build-time import guard fails the build rather than the class.
 `cublas` and `triton` — roughly 3 GB that most student laptops cannot use. YOLO11n on CPU is
 fast enough for every lab. A CUDA variant is a separate image tag, not the default.
 
+**The ground is textured, and that is not decoration.** PX4's stock `ground_plane` is one
+untextured grey quad. Under it, an aircraft translating at 4 m/s renders as a *static image*,
+so the first question in every follow lab becomes "is it even moving?". It is also out of
+distribution for a detector trained on photographs: over the textured field in
+`models/course_ground`, `course test` reports a best confidence of **0.90** where the grey
+plane gave 0.81, and the whole look-angle curve lifts by about 0.15. The mowing stripes have a
+known 2.5 m pitch, so ground speed can be read off a video frame.
+
+**The container user is uid 1000, and `run.sh` checks.** The shared volume is a bind mount and
+keeps the host's numeric owner. A mismatch makes it read-only to the container user and fails
+*silently* — `course init` succeeds, and the first `colcon build` dies on a permission error
+with nothing to connect it to the cause. See spike note 35.
+
 **`pip` uses `--break-system-packages`.** Ubuntu 24.04 enforces PEP 668. Inside a container
 that is the right trade: the alternative is a virtualenv that every student then has to
 remember to activate in every terminal.
@@ -86,7 +99,8 @@ docker/
   scripts/course          the course CLI (see below)
   scripts/px4_deps.sh     PX4 SITL build dependencies
   scripts/entrypoint.sh   sources ROS, PX4 paths and the student workspace
-models/                   the course aircraft, gimbal and ground target, vendored
+models/                   the course aircraft, gimbal, ground target and ground
+  course_ground/          textured field; make_ground.py regenerates it
 worlds/course_world.sdf   the course world
 px4/airframes/            the course airframe, with the SITL-only parameters
 ros2_ws/src/
@@ -104,7 +118,15 @@ docs/
   hardware-checklist.md   bench and field checks for the real aircraft
   field-procedure.md      roles, limits, abort criteria for the flight session
   syllabus.md             the fellowship-facing description
+  rubric.md               how the capstone is marked, student-facing
+  report-template.md      the capstone report students fill in
   spike-notes.md          every gotcha and what it cost. Read before debugging
+tools/
+  lookangle_rig/rig.py    measures detector confidence vs look angle, on a
+                          static rig -- this is where the flight geometry
+                          comes from, so re-run it before changing that
+  media/                  a clean Gazebo GUI and the capture script that makes
+                          every screenshot and clip in the slides
 install.sh                host-side setup
 run.sh                    start / re-enter the container
 PROGRESS.md               build status and session handoff

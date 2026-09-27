@@ -368,7 +368,7 @@ ground the drone then sees only the truck's rear, a dark open bed at a grazing a
 detector finds nothing. `course test` caught it immediately, which is exactly what that check is
 for. Broadside (yaw 90°) satisfies both — the target drives across the aircraft's nose rather
 than at it, and broadside is the easiest aspect for the detector: confidence went from 0.60 to
-**0.81**.
+**0.81** on the grey ground of the day, and to **0.90** once the field was textured (note 33).
 
 That aspect effect is worth carrying into the course, because it has a consequence nobody
 expects: a follower sits *behind* its target, so it spends its whole flight looking at the rear
@@ -403,3 +403,95 @@ pitch from 30° to 70°, count dark pixels) showed **0–1.7% obstruction at eve
 original mount was fine, and the blocked frame had been captured during a transient bank. The
 move was reverted. The build-time check that the URDF and SDF mount offsets agree was kept,
 because that one is worth having either way.
+
+**33. A grey plane is not a neutral background — it is a worse one.** The world used PX4's stock
+`ground_plane`: one untextured grey quad under a grey backdrop. Two costs, both invisible until
+you look for them. First, *no visual motion cue*: an aircraft translating at 4 m/s renders as a
+static image, so "is it even moving?" becomes the first question in every follow lab and the
+answer costs ten minutes of a three-hour session. Second, the detector did **worse** on it, not
+better: over a tiled grass field the best confidence in `course test` went from **0.81 to 0.90**,
+and the whole look-angle curve lifted by roughly 0.15. A blank field is out of distribution for a
+network trained on photographs. `models/course_ground` replaces it — same flat surface at z = 0,
+a mesh rather than a plane so the texture can tile at 20 m instead of being stretched over 500 m,
+and `make_ground.py` regenerates it. Mowing stripes at a known 2.5 m pitch double as a scale bar.
+
+**34. Do not measure the detector from a flying aircraft.** The first look-angle vs confidence
+curve was taken in flight: teleport the aircraft to the geometry, point the gimbal, read the
+confidence. It was not reproducible — two runs of the same angle disagreed by 0.5, because
+station-keeping error and a settling gimbal moved the target in frame, and a target half out of
+frame scores whatever it scores. That measurement was measuring station-keeping, not the
+detector. `tools/lookangle_rig/rig.py` replaces it: eleven **static** camera rigs in one world,
+all at the same slant range from one parked vehicle, so apparent size is identical in every
+frame and the only variable is the viewing angle. Two runs now agree to the second decimal.
+The conclusion survived the better method — confidence is flat from 20° to 40° and gone by 55° —
+which is the only reason the flight geometry did not have to change.
+
+**35. A bind mount carries the host's numeric owner, and the failure is silent.** The image's
+user was created with plain `useradd`, which landed on uid 1001 because Ubuntu 24.04 base images
+already ship a user at 1000. The shared volume is bind-mounted from the student's home, so it
+arrives owned by uid 1000 — read-only to the container user. Nothing says so: `course init`
+reports success, because `mkdir -p` on an existing directory succeeds whether or not you can
+write to it; `course solution` reports success; and the first `colcon build` dies on
+`PermissionError: 'log'` with nothing connecting it to the cause. Fixed three ways, because any
+one of them alone leaves a hole: the image now pins the user to uid 1000, `run.sh` aligns it at
+container creation if the host differs, and both `course doctor` and `course init` now *prove*
+the volume is writable instead of assuming it.
+
+**36. `pkill -f "ros2 launch"` does not stop a launch.** It kills the launch parent; every node
+it started keeps running. Three tiers of scoring were quietly invalidated by this — two mission
+managers both commanding OFFBOARD setpoints, so the aircraft flew to somewhere between two
+references and the result looked like a badly tuned gain. Kill by *install path*
+(`pkill -f shared_volume/ros2_ws/install`) and then check that nothing matching survived. This is
+the second time in this project that two independent causes produced one symptom.
+
+**37. One dial, two knobs, no warning.** The capstone launch file takes `tier:=`, and so does
+`course bringup`. They are not the same tier: bringup's chooses the **route the target drives**,
+the capstone launch's only reaches the **scoring node**, where it labels the report. Set one and
+not the other and nothing complains -- every run completes, every number is plausible, and four
+tiers of results come back within 0.5 points of each other because the target drove the same
+route every time. The only visible symptom was a tier-3 report saying "no blackout occurred
+(tier < 3)", which is a sentence that cannot be true. Fixed by making the thing that *knows*
+say so: `target_route_node` now publishes its tier, latched, on `/target/route_tier`, and the
+scoring node warns and scores what the route is actually doing rather than what it was told.
+`course bringup 2` also now works, so the number is typed once.
+
+**38. A slow simulation is an easier simulation, and nobody expects that.** Fixing the GPU path
+took the real-time factor from **0.38 to 1.00**, and that is not a neutral speed-up: everything
+that makes following hard is measured in *simulated* seconds. At 0.38x, 44 ms of YOLO inference
+is 17 ms of simulated latency, so the follower was being graded against a system with a third of
+the perception delay it will have on the aircraft. Every reference number taken before the fix
+was optimistic for that reason and is not comparable to one taken after it. Worse, the bias runs
+the wrong way for a class: the student with the slowest laptop gets the most forgiving physics.
+The scoring node now measures sim-time over wall-time across the scored run and prints it, in
+yellow below 0.9, so the question is answered on every run instead of never.
+
+**39. The target set off before there was anything to follow, and it scored like a failure.**
+`target_route_node` waited a fixed 20 s from its own start — which is when `course bringup` runs,
+not when the mission does. A student then builds a workspace, reads a compile error, builds
+again, and launches four minutes later. By then the target has driven a fifty-metre circuit and
+is nowhere near any plausible search pattern. Measured on tier 2: the aircraft spent **90 of 180
+scored seconds in SEARCH**, holding position at the origin sweeping an empty gimbal, and the run
+came out at **25.4 / 85** — a number that says "this follower does not work" about a follower
+that was never given a target. The node's own comment already claimed it "waits for the aircraft
+to get airborne"; it just did not do it. It now subscribes to `/drone/ground_truth`, waits for
+5 m of altitude and then counts its delay, so the run is identical whether the mission launches
+immediately or an hour later. Lesson, again: **a comment describing the intended behaviour is not
+evidence of the behaviour**, and the only thing that would have caught this is watching the
+positions rather than reading the score.
+
+**40. Twenty-nine camera bridges.** `course bringup` starts the camera bridge as a *separate
+executable* — `ros_gz_image/image_bridge`, not the `parameter_bridge` that carries everything
+else — and every cleanup written for this project killed the one and not the other. Each
+`bringup` therefore left one behind. After a couple of hours of test runs there were **29 of
+them**, all republishing the same Gazebo frames onto `/camera/image_raw`, the oldest two hours
+old. The symptoms were nothing like the cause: missions stalled in SEARCH, the detector went
+silent while burning four cores, `/mission/state` stopped arriving, and the real-time factor
+drifted from 0.99 down to 0.83. Three separate "bugs" were chased and one speculative fix
+(a multi-threaded executor in the scoring node) was written before the leak was found, because
+`ros2 node list` showed the duplicates and they were dismissed as a stale daemon cache.
+
+Two things came out of it that are worth keeping. `course stop` puts the whole stack down by
+install path and *verifies* nothing survived, and `course bringup` now refuses to start a second
+copy rather than silently doubling the camera. And the lesson, for the third time in this
+project: **when several unrelated things break at once, look for one shared resource, not three
+bugs.** Repeated identical entries in `ros2 node list` are evidence, not noise.

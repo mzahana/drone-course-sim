@@ -85,6 +85,22 @@ doctor() {
 
     echo
     echo "Your workspace"
+    # The shared volume is a bind mount and keeps the host's numeric owner.
+    # If that does not match the user in here, everything looks fine until the
+    # first colcon build dies on a permission error with no obvious cause.
+    if [ ! -d "$HOME/shared_volume" ]; then
+        warn "no shared volume mounted — your work will not survive the container"
+    elif ( set -e; t="$HOME/shared_volume/.write_check_$$"; touch "$t"; rm -f "$t" ) 2>/dev/null; then
+        ok "shared volume is writable"
+    else
+        bad "shared volume is NOT writable by $(id -un) (uid $(id -u))"
+        echo "        it is owned by uid $(stat -c %u "$HOME/shared_volume")."
+        echo "        On the host: docker rm -f ${NAME:-drone-course} and re-run ./run.sh,"
+        echo "        which aligns the uid for you."
+    fi
+
+    echo
+    echo "Your workspace"
     [ -d "$WS/src" ] && ok "$WS/src" || warn "no workspace yet — run: course init"
 
     echo
@@ -93,7 +109,18 @@ doctor() {
 }
 
 init() {
-    mkdir -p "$WS/src"
+    if ! mkdir -p "$WS/src" 2>/dev/null; then
+        echo "${RED}Cannot create $WS/src.${RST}  Run ${GRN}course doctor${RST}."
+        return 1
+    fi
+    # mkdir -p on an existing directory succeeds even when it is read-only to
+    # us, so "it worked" here would be a lie. Prove we can write.
+    if ! ( t="$WS/src/.write_check_$$"; touch "$t" && rm -f "$t" ) 2>/dev/null; then
+        echo "${RED}$WS/src exists but is not writable by you.${RST}"
+        echo "Run ${GRN}course doctor${RST} — this is almost always a uid mismatch"
+        echo "on the shared volume, and re-running ./run.sh on the host fixes it."
+        return 1
+    fi
     echo "Workspace ready at $WS/src"
     echo "On your host machine this is ~/drone_course_shared_volume/ros2_ws/src"
 }
@@ -175,7 +202,75 @@ mavros_up() {
         "$@"
 }
 
+# Everything `course bringup` and a mission start. Used by `course stop`, and
+# by bringup itself to refuse to start a second copy.
+COURSE_PROCS=(
+    "ros_gz_image/image_bridge"        # the camera bridge
+    "ros_gz_bridge/parameter_bridge"
+    "drone_course_sim/lib"             # detector, gimbal, TF, route, scoring
+    "mavros_node"
+    "mavros_router"
+    "robot_state_publisher"
+    "shared_volume/ros2_ws/install"    # the student's own nodes
+)
+
+course_running() {
+    local p
+    for p in "${COURSE_PROCS[@]}"; do
+        pgrep -f "$p" > /dev/null && return 0
+    done
+    return 1
+}
+
+# `course stop` -- put the stack down, and leave nothing behind.
+#
+# This exists because leaving one process alive is the most expensive failure
+# in this environment and the hardest to see. Ctrl-C on a `ros2 launch` kills
+# the launch parent; the nodes it started keep running. Do that a few times
+# and you have a dozen camera bridges all republishing the same Gazebo images
+# onto /camera/image_raw, the detector drowning in duplicate frames, and a
+# stack that fails in ways that look like your code.
+stop() {
+    local p c n=0
+    for p in "${COURSE_PROCS[@]}"; do
+        # pgrep -c prints 0 AND exits non-zero when nothing matches, so a
+        # `|| echo 0` fallback appends a second zero and the arithmetic dies.
+        c="$(pgrep -fc "$p" 2>/dev/null)" || true
+        n=$(( n + ${c:-0} ))
+        pkill -f "$p" 2>/dev/null
+    done
+    sleep 2
+    for p in "${COURSE_PROCS[@]}"; do pkill -9 -f "$p" 2>/dev/null; done
+    if [ "${1:-}" = "--all" ]; then
+        pkill -9 -f "gz sim" 2>/dev/null
+        pkill -9 -f "bin/px4" 2>/dev/null
+        echo "stopped the simulator too"
+    fi
+    sleep 1
+    if course_running; then
+        echo "${YEL}something survived:${RST}"
+        for p in "${COURSE_PROCS[@]}"; do pgrep -af "$p" | head -3; done
+    else
+        echo "stopped ${GRN}${n}${RST} process(es); nothing left running"
+    fi
+}
+
+# `course bringup` / `course bringup 2` / `course bringup tier:=2`
+#
+# The tier chooses the ROUTE the target drives, and it is set here -- not in
+# the capstone launch file, whose own tier:= argument only labels the scoring
+# report. Accept a bare number so the two cannot drift apart by a typo.
 bringup() {
+    # Refuse to start a second stack. Two camera bridges is not twice as good;
+    # it is two publishers on /camera/image_raw and a detector that sees each
+    # frame twice, at half the rate it thinks.
+    if course_running; then
+        echo "${YEL}A bringup is already running.${RST}"
+        echo "Run ${GRN}course stop${RST} first, or ${GRN}course stop --all${RST}"
+        echo "to put the simulator down as well."
+        return 1
+    fi
+    if [[ "${1:-}" =~ ^-?[0-3]$ ]]; then set -- "tier:=$1" "${@:2}"; fi
     ros2 launch drone_course_sim sim_bringup.launch.py "$@"
 }
 
@@ -198,8 +293,21 @@ scenario_test() {
     ros2 run drone_course_sim scenario_test.py
 }
 
+# `course score` / `course score 2` / `course score 2 240`
+#
+# rclpy refuses an integer for a parameter declared double -- `duration:=180`
+# is an error and `duration:=180.0` is not, which is a silly thing for a
+# student to lose five minutes to in the middle of a graded run. Take plain
+# numbers and do the conversion here.
 score() {
-    ros2 run drone_course_sim scoring_node.py --ros-args -p use_sim_time:=true "$@"
+    local tier="" dur=""
+    if [[ "${1:-}" =~ ^[0-3]$ ]]; then tier="$1"; shift; fi
+    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then dur="$1.0"; shift
+    elif [[ "${1:-}" =~ ^[0-9]+\.[0-9]+$ ]]; then dur="$1"; shift; fi
+    local args=(--ros-args -p use_sim_time:=true)
+    [ -n "$tier" ] && args+=(-p "tier:=$tier")
+    [ -n "$dur" ] && args+=(-p "duration:=$dur")
+    ros2 run drone_course_sim scoring_node.py "${args[@]}" "$@"
 }
 
 EXERCISES="${EXERCISES:-/opt/course_exercises}"
@@ -247,9 +355,12 @@ solution() {
     esac
     local src="$EXERCISES/solutions/$pkg"
     [ -d "$src" ] || { echo "${RED}no solution for $pkg at $src${RST}"; return 1; }
-    mkdir -p "$WS/src"
+    init >/dev/null || return 1
     rm -rf "$WS/src/$pkg"
-    cp -r "$src" "$WS/src/$pkg"
+    if ! cp -r "$src" "$WS/src/$pkg"; then
+        echo "${RED}could not copy $pkg into $WS/src${RST} — run ${GRN}course doctor${RST}"
+        return 1
+    fi
     echo "${GRN}$pkg${RST} is now at $WS/src/$pkg"
     echo "It is a separate package, so your own version still builds and runs."
     echo "  cd $WS && colcon build --packages-select $pkg && source install/setup.bash"
@@ -258,6 +369,7 @@ solution() {
 case "${1:-help}" in
     doctor) doctor ;;
     bringup) shift; bringup "$@" ;;
+    stop) shift; stop "$@" ;;
     verify) verify ;;
     test) scenario_test ;;
     score) shift; score "$@" ;;
@@ -276,10 +388,13 @@ usage: course <command>
   doctor    check that everything needed is installed and working
   init      create your ROS 2 workspace in the shared volume
   sim       start PX4 SITL + Gazebo with the course gimbal
-  bringup   start MAVROS, the gz bridges and the TF tree
+  stop [--all]  stop everything bringup started; --all stops the simulator too
+  bringup [T]  start MAVROS, the gz bridges, the TF tree and the target
+            route; T = tier 0-3 (default 1), which picks the route
   verify    check the full map -> base_link -> camera_optical_frame chain
   test      end-to-end scenario check (camera, detector, target, blackout)
-  score     grade a running mission against Gazebo ground truth
+  score [T] [S]  grade a running mission against ground truth
+            T = tier 0-3, S = seconds (default 120)
   new N     scaffold a lab skeleton into your workspace  (lab3|lab4|lab5|capstone)
   solution N  reveal the reference solution for a lab
   desktop   start the browser-based desktop (no X11 needed)

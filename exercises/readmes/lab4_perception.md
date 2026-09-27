@@ -53,7 +53,7 @@ In RViz — `course rviz` opens the course layout with all of this already confi
 ellipse should sit on the target, and it should visibly stretch *along* the line of sight when
 you look down at a shallow angle. If it stays circular, you have not done step 4.
 
-For reference, the solution achieves **1.2–1.3 m RMS** against ground truth at the capstone
+For reference, the solution achieves **0.9–1.1 m RMS** against ground truth at the capstone
 geometry. Most of what is left is not yours to fix: see the yaw note below.
 
 ## The four things that will bite you

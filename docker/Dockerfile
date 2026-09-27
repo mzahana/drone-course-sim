@@ -88,7 +88,21 @@ print('detector self-test ok:', n, 'objects')"
 ENV YOLO_WEIGHTS=/opt/models/yolo11n.pt
 
 # ---------------------------------------------------------------- 4. Course user
-RUN useradd -ms /bin/bash ${USERNAME} && echo "${USERNAME}:${USERNAME}" | chpasswd \
+# UID 1000, deliberately, and not whatever useradd picks.
+#
+# The course bind-mounts a directory from the student's home into the
+# container. A bind mount carries the HOST's numeric owner, so if the user
+# inside the container has a different uid, the shared volume is read-only to
+# them -- and it fails silently: `course init` reports success (mkdir -p on an
+# existing directory is a no-op), the workspace looks fine, and the first
+# `colcon build` dies on a permission error with nothing to connect it to.
+#
+# Ubuntu 24.04 base images already ship a user at uid 1000 ('ubuntu'), which
+# is why useradd lands on 1001. Remove it first. A student whose own uid is
+# not 1000 is handled at run time by run.sh, which says so and fixes it.
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && useradd -u 1000 -ms /bin/bash ${USERNAME} \
+    && echo "${USERNAME}:${USERNAME}" | chpasswd \
     && usermod -aG sudo,dialout,video ${USERNAME} \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME}
 
@@ -146,6 +160,7 @@ COPY --chown=${USERNAME}:${USERNAME} models/course_x500 ${PX4_DIR}/Tools/simulat
 COPY --chown=${USERNAME}:${USERNAME} models/course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/course_gimbal
 COPY --chown=${USERNAME}:${USERNAME} models/x500_course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/x500_course_gimbal
 COPY --chown=${USERNAME}:${USERNAME} models/course_target_vehicle ${PX4_DIR}/Tools/simulation/gz/models/course_target_vehicle
+COPY --chown=${USERNAME}:${USERNAME} models/course_ground ${PX4_DIR}/Tools/simulation/gz/models/course_ground
 RUN M=${PX4_DIR}/Tools/simulation/gz/models \
     && python3 -c "import xml.dom.minidom as m, sys; \
 [m.parse(f) for f in sys.argv[1:]]; print('course SDF xml ok')" \

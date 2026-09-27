@@ -5,7 +5,7 @@ Run it alongside a student's mission; it watches for a fixed duration and
 prints a scored breakdown plus a JSON file.
 
     ros2 run drone_course_sim scoring_node.py --ros-args \
-        -p duration:=120.0 -p standoff:=8.0 -p altitude:=15.0
+        -p duration:=180.0 -p standoff:=18.0 -p altitude:=12.0
 
 Design decisions worth not re-litigating:
 
@@ -36,16 +36,20 @@ import json
 import math
 import os
 import sys
+import time
 
 import rclpy
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
+                       ReliabilityPolicy)
 
 import tf2_ros
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from sensor_msgs.msg import CameraInfo
-from std_msgs.msg import Float64, String
+from std_msgs.msg import Float64, Int32, String
 
 SENSOR_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT,
                         history=HistoryPolicy.KEEP_LAST)
@@ -92,8 +96,8 @@ class Scorer(Node):
         # would suggest. EKF2's yaw in this simulator sits 5 to 6 degrees off
         # truth (reproducible with stock PX4 and the stock world, so not
         # something a student can fix), and a yaw error rotates the bearing ray
-        # about the vertical: at the default 8 m standoff and 15 m altitude the
-        # target is about 17 m away on the ground, so that alone is ~1.6 m.
+        # about the vertical: at the default 18 m standoff the target is 18 m
+        # away on the ground, so 5.5 degrees of yaw alone is ~1.7 m.
         # Setting the threshold below the achievable floor would grade everyone
         # on the simulator's compass rather than on their own work.
         self.declare_parameter("rms_full_marks", 2.0)  # m
@@ -118,6 +122,14 @@ class Scorer(Node):
         self.airborne = float(g("airborne_altitude"))
         self.output = str(g("output"))
         self.tier = int(g("tier"))
+        # What the ROUTE is actually driving, as announced by target_route_node.
+        # The tier is configured in two places that look like one -- `course
+        # bringup tier:=N` picks the route, the capstone launch's tier:= only
+        # reaches this node -- so being told "tier 3" while the target drives
+        # tier 1 is a configuration a student will produce, and it is silent:
+        # every run completes and every number looks plausible. Latch what the
+        # route says and say so if they disagree.
+        self.route_tier = None
 
         # latest inputs
         self.truth_t = None      # (t, x, y, z, vx, vy)
@@ -131,15 +143,38 @@ class Scorer(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-        self.create_subscription(Odometry, "/target/ground_truth", self._truth_t, SENSOR_QOS)
-        self.create_subscription(Odometry, "/drone/ground_truth", self._truth_d, SENSOR_QOS)
+        # A reentrant group and a multi-threaded executor.
+        #
+        # Honest history: this was added on a wrong diagnosis. The node had
+        # recorded zero mission states across a whole run, and callback
+        # starvation looked like the explanation -- it subscribes to two 50 Hz
+        # odometries, /tf, /tf_static and the camera info alongside a 2 Hz
+        # status string. The real cause was twenty-nine leaked camera bridges
+        # saturating the machine (spike note 40), and this changed nothing.
+        #
+        # It is kept because it is still the right shape for a node that must
+        # sample on a timer while high-rate topics arrive: a scorer that drops
+        # samples because it was busy transforming a pose is measuring itself.
+        # It is not load-bearing. Do not treat it as a fix for anything.
+        self.cbg = ReentrantCallbackGroup()
+        self.create_subscription(Odometry, "/target/ground_truth", self._truth_t, SENSOR_QOS,
+                                 callback_group=self.cbg)
+        self.create_subscription(Odometry, "/drone/ground_truth", self._truth_d, SENSOR_QOS,
+                                 callback_group=self.cbg)
         self.create_subscription(PoseWithCovarianceStamped, "/target/estimate",
-                                 self._estimate, 10)
+                                 self._estimate, 10,
+                                 callback_group=self.cbg)
         # A team may publish the filtered track instead of the raw locate.
-        self.create_subscription(Odometry, "/target/track", self._track, 10)
-        self.create_subscription(CameraInfo, "/camera/camera_info", self._cam, SENSOR_QOS)
-        self.create_subscription(String, "/mission/state", self._state, 10)
-        self.create_subscription(Float64, "/detector/blackout", self._blackout, 10)
+        self.create_subscription(Odometry, "/target/track", self._track, 10, callback_group=self.cbg)
+        self.create_subscription(CameraInfo, "/camera/camera_info", self._cam, SENSOR_QOS,
+                                 callback_group=self.cbg)
+        self.create_subscription(String, "/mission/state", self._state, 10, callback_group=self.cbg)
+        self.create_subscription(Float64, "/detector/blackout", self._blackout, 10, callback_group=self.cbg)
+        self.create_subscription(
+            Int32, "/target/route_tier", self._route_tier,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                       reliability=ReliabilityPolicy.RELIABLE),
+            callback_group=self.cbg)
 
         # accumulators
         self.n = 0
@@ -160,8 +195,18 @@ class Scorer(Node):
         self.max_radius = 0.0
         self.states_seen = set()
         self.t0 = None
+        # Sim time against wall time. Everything in this stack that matters --
+        # detector latency, control rate, how far the target moves between two
+        # frames -- is measured in SIMULATED seconds, so a simulation running
+        # at half speed is a system with half the latency. Scores taken on a
+        # machine that cannot hold real time are not comparable to scores taken
+        # on one that can, and without this line nobody would ever know which
+        # kind they were looking at. It is the same question on the aircraft,
+        # where the answer is always 1.0 and cannot be negotiated.
+        self.wall0 = time.monotonic()
 
-        self.timer = self.create_timer(self.period, self._sample)
+        self.timer = self.create_timer(self.period, self._sample,
+                               callback_group=self.cbg)
         self.get_logger().info(
             f"scoring for {self.duration:.0f} s -- standoff {self.d:.1f} m, "
             f"altitude {self.h:.1f} m, tolerance {self.station_tol:.1f} m")
@@ -197,6 +242,17 @@ class Scorer(Node):
     def _state(self, msg):
         self.state = msg.data
         self.states_seen.add(msg.data)
+
+    def _route_tier(self, msg):
+        self.route_tier = int(msg.data)
+        if self.route_tier != self.tier:
+            self.get_logger().warn(
+                f"asked to score tier {self.tier}, but the target is driving "
+                f"tier {self.route_tier}. The ROUTE is chosen by "
+                f"`course bringup tier:={self.route_tier}`; this node's tier "
+                f"parameter only labels the report. Scoring tier "
+                f"{self.route_tier}.")
+            self.tier = self.route_tier
 
     def _blackout(self, msg):
         if msg.data > 0.0:
@@ -331,13 +387,19 @@ class Scorer(Node):
         s_floor = 5.0 if self.floor_violations == 0 else 0.0
         s_fence = 5.0 if self.fence_violations == 0 else 0.0
         if self.n_blackout == 0:
-            s_coast, coast_note = 5.0, "no blackout occurred (tier < 3)"
+            s_coast = 5.0
+            coast_note = ("no blackout occurred (tier < 3)" if self.tier < 3
+                          else "TIER 3 BUT NO BLACKOUT -- is the route running?")
             coast_frac = None
         else:
             coast_frac = frac(self.n_blackout_ok, self.n_blackout)
             s_coast = 5.0 * coast_frac
             coast_note = f"{coast_frac * 100:.0f}% of blackout samples within {self.coast_tol:.0f} m"
         s_robust = s_floor + s_fence + s_coast
+
+        wall = time.monotonic() - self.wall0
+        sim = (self._now() - self.t0) if self.t0 is not None else 0.0
+        self.rtf = (sim / wall) if wall > 1.0 else None
 
         automated = s_station + s_est + s_frame + s_robust
 
@@ -371,6 +433,7 @@ class Scorer(Node):
                 "coast_fraction": round(coast_frac, 4) if coast_frac is not None else None,
                 "score": round(s_robust, 2), "weight": 15},
             "mission_states_seen": sorted(self.states_seen),
+            "real_time_factor": round(self.rtf, 3) if self.rtf else None,
             "automated_total": round(automated, 2),
             "automated_out_of": 85,
             "manual_remaining": "15 for code quality, reproducibility, report and demo",
@@ -388,6 +451,14 @@ class Scorer(Node):
 
         print()
         print(f"{BLD}Capstone score -- tier {self.tier}, {self.duration:.0f} s{RST}")
+        if self.rtf is not None:
+            if self.rtf >= 0.9:
+                print(f"  simulation ran at {self.rtf:.2f} x real time")
+            else:
+                print(f"  {YEL}simulation ran at {self.rtf:.2f} x real time{RST} -- "
+                      f"slower than the aircraft flies, so your perception latency "
+                      f"and control rate\n  are not what they will be on hardware, "
+                      f"and this score is not comparable to one taken at 1.0.")
         print()
         line("Time on station", s_station, 30,
              f"{on_station*100:.0f}% within {self.station_tol:.0f} m "
@@ -418,8 +489,10 @@ class Scorer(Node):
 def main():
     rclpy.init()
     node = Scorer()
+    ex = MultiThreadedExecutor(num_threads=4)
+    ex.add_node(node)
     try:
-        rclpy.spin(node)
+        ex.spin()
     except KeyboardInterrupt:
         pass
     return 0

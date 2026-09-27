@@ -60,7 +60,30 @@ fi
 # student laptop means losing whatever they had running.
 VNC_PORT="${VNC_PORT:-6080}"
 
-docker run -it \
+# ---------------------------------------------------------------------------
+# UID alignment.
+#
+# The shared volume is a bind mount, so it keeps the HOST's numeric owner. The
+# image's user is uid 1000, which is what almost every Linux and WSL2 account
+# is. If yours is not, the container cannot write to your own workspace -- and
+# it fails silently, several commands later, as a colcon permission error. So
+# check, say so, and fix it once when the container is created.
+# ---------------------------------------------------------------------------
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+
+fix_uid() {
+    [ "${HOST_UID}" = "1000" ] && [ "${HOST_GID}" = "1000" ] && return 0
+    echo "[run] your uid:gid is ${HOST_UID}:${HOST_GID}, the image ships 1000:1000"
+    echo "[run] aligning the container user so the shared volume is writable (one time, ~1 min)"
+    docker exec -u root "${NAME}" bash -c "
+        groupmod -g ${HOST_GID} user 2>/dev/null || true
+        usermod -u ${HOST_UID} -g ${HOST_GID} user
+        chown -R ${HOST_UID}:${HOST_GID} /home/user /opt/PX4-Autopilot /opt/course_ws /opt/course_exercises
+    " || echo "[run] WARNING: could not align uid; 'course doctor' will tell you if it matters"
+}
+
+docker run \
     --name "${NAME}" \
     --publish "127.0.0.1:${VNC_PORT}:6080" \
     "${NET_ARGS[@]}" \
@@ -74,4 +97,7 @@ docker run -it \
     --env QT_X11_NO_MITSHM=1 \
     --volume /tmp/.X11-unix:/tmp/.X11-unix:rw \
     --volume "${SHARED}:/home/user/shared_volume:rw" \
-    "${IMAGE}" bash
+    --detach --tty "${IMAGE}" bash > /dev/null
+
+fix_uid
+exec docker exec -it "${NAME}" bash

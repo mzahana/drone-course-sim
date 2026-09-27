@@ -38,6 +38,13 @@ source install/setup.bash
 ros2 launch capstone_follow capstone.launch.py score:=true duration:=180.0 tier:=2
 ```
 
+**The tier appears twice on purpose, and they are not the same dial.** `course bringup tier:=2`
+chooses the **route the target drives**. The `tier:=2` on the capstone launch only reaches the
+**scoring node**, where it labels the report. Set one and forget the other and nothing complains:
+the run completes and the numbers look plausible. The route now announces itself on
+`/target/route_tier`, so the scorer prints a warning and grades what the target actually did —
+but read the warning if it appears, because a tier-1 route scored as tier 3 is not your result.
+
 ## How it is scored
 
 `course score` (or `score:=true` above) runs the scoring node against Gazebo ground truth and
@@ -79,7 +86,8 @@ Beating these numbers is possible, and saying by how much belongs in your report
 **Nothing that flies may read `/target/ground_truth` or `/drone/ground_truth`.** They do not
 exist on the real aircraft. A mission that subscribes to one works perfectly in simulation and
 cannot be transferred — which is exactly the failure this course is built to make visible. The
-scoring script reads them; your code does not.
+scoring script reads them; your code does not. A submission that subscribes to either from a
+node that flies scores **zero on the automated 85**, whatever the script printed at the time.
 
 **One command must reproduce your result.** A launch file, and a README saying which tier and
 how long. "It worked on my machine last night" is not a submission.

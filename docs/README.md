@@ -1,15 +1,17 @@
 # Course documentation
 
-Five documents plus the build notes. Each one has a single audience — read the row that is you.
+Seven documents plus the build notes. Each one has a single audience — read the row that is you.
 
 | Document | Who it is for | When you read it |
 |---|---|---|
 | [`prework.md`](prework.md) | **Students** | Before Day 1. Install Docker, pull the image, run `course doctor`. Ends in a checklist. |
 | [`troubleshooting.md`](troubleshooting.md) | **Students, and instructors triaging** | The moment something breaks. Indexed by the error message on screen. |
+| [`rubric.md`](rubric.md) | **Students building the capstone** | Before you tune anything. What the 85 automated points measure, what the scorer exempts, and the 15 a marker applies. |
+| [`report-template.md`](report-template.md) | **Students writing the capstone report** | After your last scored run. Copy it into your repository as `REPORT.md` and fill it in. |
 | [`hardware-checklist.md`](hardware-checklist.md) | **Whoever has hands on the aircraft** | Day 1 inspection, and before every bench test and every flight. |
 | [`field-procedure.md`](field-procedure.md) | **The Day 4 flight team** | Read aloud at the site brief, then followed in order. |
 | [`syllabus.md`](syllabus.md) | **The fellowship programme office** | Course approval and scheduling. Non-technical reader. |
-| [`spike-notes.md`](spike-notes.md) | **Whoever maintains the environment** | Before debugging anything that smells environmental. Twenty numbered gotchas and what each cost. |
+| [`spike-notes.md`](spike-notes.md) | **Whoever maintains the environment** | Before debugging anything that smells environmental. Forty numbered gotchas and what each cost. |
 
 Elsewhere in the repository and alongside it:
 

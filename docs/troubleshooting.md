@@ -660,6 +660,39 @@ delete it and start a fresh one — your code is in the shared volume and is not
 docker rm -f drone-course && ./run.sh
 ```
 
+### The ground is flat grey, and everything is slow
+
+Gazebo has fallen back to software rendering. The course field is a textured, mown grass surface;
+if you are looking at a featureless grey plane, nothing is rendering on the GPU.
+
+Check what the simulation is actually achieving:
+
+```bash
+gz topic -e -t /stats -n 1 | grep real_time_factor
+```
+
+Below about 0.9 and you are not running in real time. It still works — every lab completes — but
+it is not the same system: perception latency and control rate are both measured in *simulated*
+seconds, so a slow simulation is a system with less latency than the real aircraft has, and
+`course score` will flatter you for it. The scorer prints the factor it saw, and turns it yellow
+below 0.9, for exactly this reason.
+
+On a machine with an NVIDIA GPU, the usual cause is that EGL picked the Mesa vendor and failed:
+
+```bash
+grep -i "libEGL\|dri2" /tmp/gzgui.log          # 'failed to create dri2 screen' means Mesa
+```
+
+Force the NVIDIA vendor and restart the GUI:
+
+```bash
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+```
+
+If you have no GPU at all, this is simply your machine, and the honest thing is to say which
+real-time factor your reported score was taken at.
+
 ### Inference is slow / `no CUDA — inference will run on CPU`
 
 Expected and fine. On CPU, YOLO11n is **22–26 ms per frame at 640 px** and **42 ms at the course
