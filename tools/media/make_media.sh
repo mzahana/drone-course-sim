@@ -113,6 +113,46 @@ m_blackout() {
     $CAP rec detector-blackout 100 full
 }
 
+# Day 3, "Where these frames sit on the aircraft": the aircraft in RViz with
+# the four frames the slide names, at the capstone's 35 degree look-down. It
+# replaces a generated picture that had the axis directions wrong, so the one
+# thing that matters is that every arrow comes from the live /tf; see
+# frame_axes.py for why it does not use RViz's own TF display.
+#
+# Its own 4:3 X server rather than the desktop, so the shot does not depend on
+# the size of whatever desktop happens to be up, and RViz --fullscreen fills
+# it with nothing but the 3D view: no panels to crop.
+m_frames() {
+    local disp="${FRAMES_DISPLAY:-:97}" out="$MEDIA/day3-frames-on-aircraft.png" share
+    fresh 0
+    # ROS's and colcon's setup.bash read unbound variables, so -u must be off
+    set +u
+    # shellcheck disable=SC1091
+    source /opt/ros/jazzy/setup.bash
+    # shellcheck disable=SC1091
+    source /opt/course_ws/install/setup.bash
+    set -u
+    share="$(ros2 pkg prefix drone_course_sim)/share/drone_course_sim"
+    # Held for the whole shot. Pitch negative is down, same as the A8 mini.
+    timeout 120 ros2 topic pub -r 2 /gimbal/cmd/angle geometry_msgs/msg/Vector3Stamped \
+        "{vector: {x: 0.0, y: -0.6109, z: 0.0}}" > /dev/null 2>&1 &
+    python3 "$HERE/frame_axes.py" --ros-args -p use_sim_time:=true \
+        > /tmp/frame_axes.log 2>&1 &
+    Xvfb "$disp" -screen 0 1600x1200x24 > /tmp/xvfb_frames.log 2>&1 &
+    sleep 2
+    DISPLAY="$disp" ros2 run rviz2 rviz2 -d "$share/rviz/frames_on_aircraft.rviz" \
+        --fullscreen --ros-args -p use_sim_time:=true > /tmp/rviz_frames.log 2>&1 &
+    sleep 25                       # gimbal settled, meshes loaded, markers in
+    DISPLAY="$disp" import -window root "$out"
+    # By pattern, not PID: `ros2 run` leaves its child behind when killed.
+    # Brackets so the pattern cannot match this shell's own command line.
+    pkill -f "[f]rames_on_aircraft.rviz"
+    pkill -f "[f]rame_axes.py"
+    pkill -f "[X]vfb $disp"
+    pkill -f "[g]imbal/cmd/angle"
+    echo "$out"
+}
+
 # Lab 3: the OFFBOARD square, which is the first thing a student flies.
 m_offboard() {
     fresh 0
@@ -166,12 +206,13 @@ case "${1:-help}" in
     capstone)  m_capstone ;;
     closeups)  m_closeups ;;
     rviz)      m_rviz ;;
+    frames)    m_frames ;;
     blackout)  m_blackout ;;
     offboard)  m_offboard ;;
     firstrun)  m_first_run ;;
     ekf2)      m_ekf2 ;;
     qgc)       m_qgc ;;
-    all)       for t in closeups capstone rviz blackout offboard qgc firstrun; do
+    all)       for t in closeups capstone rviz frames blackout offboard qgc firstrun; do
                    echo "=== $t ==="; "m_${t/firstrun/first_run}"; done ;;
     *) sed -n '2,10p' "${BASH_SOURCE[0]}" ;;
 esac

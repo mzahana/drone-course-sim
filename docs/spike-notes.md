@@ -495,3 +495,37 @@ install path and *verifies* nothing survived, and `course bringup` now refuses t
 copy rather than silently doubling the camera. And the lesson, for the third time in this
 project: **when several unrelated things break at once, look for one shared resource, not three
 bugs.** Repeated identical entries in `ros2 node list` are evidence, not noise.
+
+---
+
+# Step 8 — the aircraft in RViz, and where the gimbal really pivots
+
+**41. Link origins that coincide are not a rotation centre.** Step 3 read the gimbal's link
+poses out of a running simulation, found every origin at one point, and concluded that point was
+the rotation centre, so the URDF's revolute joints got zero translation. It is not the rotation
+centre. An SDF joint pivots about its own `<pose>`, expressed in the child link, and on this
+gimbal the pitch pivot is 0.16 m below the link origins. The measurement was right. It was just
+taken at the one pose where the mistake cannot show: at zero joint angles every model agrees.
+Pitch the gimbal 35° and Gazebo's `camera_link` is 0.10 m from TF, and the optical frame sat
+16 cm above the lens all along. Found because an RViz picture of the frames on the aircraft
+showed three of them stacked at one point inside the top plate. **Check a kinematic model
+somewhere other than zero.** The URDF now puts each link at its pivot, and TF matches Gazebo to
+1.4 mm across four gimbal poses.
+
+**42. rviz2 decides a link's material from its FIRST visual.** `RobotLink::getMaterialForLink`
+returns `RVIZ/ShadedRed` for every untextured mesh on a link whose first `<visual>` has no
+`<material>`, whatever the later visuals say. With the textured body DAE listed first, all four
+props came out red. Give every visual a material. DAEs keep their own textures regardless.
+
+**43. RViz's TF display is the wrong tool for a slide.** It draws frame names in white,
+unreadable on a light background, with no colour setting. It ignored a per-frame
+`Frames: {All Enabled: false, <frame>: {Value: true}}` filter loaded from a config file, and
+drew every frame in the tree. `tools/media/frame_axes.py` draws the chosen frames as
+frame-locked markers instead, so RViz still places every arrow through `/tf`.
+
+**44. `pkill -f PATTERN` inside `bash -c '...PATTERN...'` kills its own shell.** The pattern
+appears in the shell's own command line, so the first `pkill` terminates the script that was
+supposed to run the rest. Every cleanup after it silently never ran, and a second bringup
+started beside the first: duplicate `robot_state_publisher`s, one publishing the old URDF. Write
+the pattern as `"[r]obot_state_publisher"`, which matches the process but not itself. Same family
+as note 40.

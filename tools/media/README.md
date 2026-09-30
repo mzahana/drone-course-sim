@@ -15,7 +15,8 @@ without having to remember what was done the first time.
 | | |
 |---|---|
 | `capture.sh` | The primitives: `shot`, `rec`, `rec-bg`, `closeup`, `follow`, `frame`, `term`, `type`, `rviz`, `qgc`, `gazebo-gui` |
-| `make_media.sh` | One target per deliverable: `closeups`, `capstone`, `offboard`, `blackout`, `rviz`, `qgc`, `firstrun`, `ekf2`, or `all` |
+| `make_media.sh` | One target per deliverable: `closeups`, `capstone`, `offboard`, `blackout`, `rviz`, `frames`, `qgc`, `firstrun`, `ekf2`, or `all` |
+| `frame_axes.py` | Draws chosen TF frames as labelled axes for `frames`, placed by the live `/tf` |
 | `crop_for_slides.py` | Crops the captures to what a slide needs, from a table of named boxes |
 
 ## Running them

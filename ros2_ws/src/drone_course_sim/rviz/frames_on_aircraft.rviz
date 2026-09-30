@@ -1,0 +1,72 @@
+# The Day 3 slide "Where these frames sit on the aircraft", and nothing else.
+#
+# Separate from course.rviz so the lab layout stays uncluttered. Shot by
+# `tools/media/make_media.sh frames`, which also pitches the gimbal to the
+# capstone's 35 degree look-down before capturing.
+#
+# The axes are the real /tf, not drawn: the image this replaced was a
+# generated picture that got the axis directions wrong. Only the four frames
+# the slide talks about are shown: the body, the yaw joint, the pitch joint
+# and the optical frame.
+#
+# They come from tools/media/frame_axes.py rather than the TF display, which
+# draws names in white (invisible on this background) and did not apply a
+# per-frame filter from this file. Its arrows are frame-locked markers in each
+# frame, so RViz places them through /tf just as the TF display would.
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Name: root
+  Global Options:
+    Background Color: 251; 250; 247
+    Fixed Frame: base_link
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/RobotModel
+      Name: Aircraft
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Frames (from /tf)
+      Enabled: true
+      Topic:
+        Value: /media/frame_axes
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 0.95
+      Focal Point:
+        X: 0.03
+        Y: 0
+        Z: -0.07
+      # Yaw is from the nose towards the left side. Far enough round that
+      # camera_link's +x, which points BACKWARDS, is not seen end-on behind
+      # the gimbal bracket, as it is from a view closer to head-on.
+      Pitch: 0.35
+      Yaw: 1.15
+      Near Clip Distance: 0.01
+Window Geometry:
+  Height: 1200
+  Width: 1600
+  Hide Left Dock: true
+  Hide Right Dock: true

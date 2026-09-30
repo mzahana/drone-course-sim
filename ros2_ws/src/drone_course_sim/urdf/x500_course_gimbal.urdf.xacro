@@ -2,11 +2,20 @@
 <!--
   TF tree for the course aircraft.
 
-  The link origins are NOT guessed from the SDF: they were read out of a running
-  simulation. In the assembled model every gimbal link origin coincides at the
-  gimbal's rotation centre, which sits 0.02 m above base_link (base_link is at
-  z = 0.24 in the model frame, the gimbal is merged at z = 0.26). That is why
-  the three revolute joints below have zero translation.
+  Every number here was checked against a running simulation, not only read
+  off the SDF. The gimbal model frame sits 0.02 m above base_link (base_link is
+  at z = 0.24 in the model frame, the gimbal is merged at z = 0.26), and at
+  zero joint angles every gimbal link origin coincides with it.
+
+  That point is NOT where the gimbal rotates. Each SDF joint pivots about its
+  own point (the joint <pose>, in the child link), and the pitch pivot is
+  0.16 m lower, at the camera. An earlier version of this file put all three
+  revolute joints at zero translation, i.e. pivoting at the mount: rotations
+  right, positions wrong. camera_optical_frame sat 16 cm above the lens, and
+  at 35 deg of pitch Gazebo's camera_link was 0.10 m from where TF said. So
+  each link frame below is placed at its joint's pivot instead. Measured, at
+  34.6 deg pitch: a rotation about the SDF pivot predicts camera_link at
+  (0.0993, 0, 0.0147) from base_link, and Gazebo reports (0.0993, 0, 0.0147).
 
   Joint angles come from /joint_states. In simulation those are published by the
   model's JointStatePublisher; on the real aircraft the SIYI driver's attitude
@@ -16,7 +25,7 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="x500_course_gimbal">
 
   <xacro:property name="pi2" value="1.5707963267948966"/>
-  <!-- Gimbal rotation centre relative to base_link. -->
+  <!-- Gimbal model frame relative to base_link. -->
   <!-- Measured from a running simulation, not derived on paper: read the
        link poses out of /world/course_world/pose/info and subtract base_link's.
        The payload sits forward of and just below the airframe centre so the
@@ -26,11 +35,111 @@
   <xacro:property name="mount_x" value="0.0"/>
   <xacro:property name="mount_z" value="0.02"/>
 
-  <link name="base_link"/>
-  <link name="cgo3_mount_link"/>
-  <link name="cgo3_vertical_arm_link"/>
-  <link name="cgo3_horizontal_arm_link"/>
-  <link name="camera_link"/>
+  <!-- Joint pivots in the gimbal model frame, copied from the joint <pose>s
+       in models/course_gimbal/model.sdf (at zero angles every child link frame
+       is the model frame, so these need no conversion). The model frame is
+       yawed 180 deg from base_link: -x here is aircraft FORWARD. -->
+  <xacro:property name="yaw_px" value="-0.02552"/>                 <!-- cgo3_vertical_arm_joint -->
+  <xacro:property name="roll_pz" value="-0.1619"/>                 <!-- cgo3_horizontal_arm_joint -->
+  <xacro:property name="pitch_px" value="-0.0412"/>                <!-- cgo3_camera_joint -->
+  <xacro:property name="pitch_pz" value="-0.162"/>
+  <!-- The camera sensor, in the same frame: <sensor name="camera"> <pose>.
+       It sits 3.3 cm in front of the pitch pivot. -->
+  <xacro:property name="lens_px" value="-0.074"/>
+
+  <!--
+    Visuals, so RViz draws the aircraft under its frames. They are for looking
+    at only: nothing reads them, and they change no transform.
+
+    The meshes are the ones Gazebo renders, installed into this package's share
+    by CMakeLists.txt from models/: one copy in git, two consumers. Every
+    pose is copied from the SDF:
+
+      base_link  the SDF's base_link has the same frame as this one, so the
+                 body and motor-base poses are used as they are. The rotors are
+                 separate spinning links in the SDF; here they are fixed to
+                 base_link at (rotor link pose + rotor visual pose), which is
+                 a sum because none of those poses carries a rotation.
+      gimbal     every gimbal link in models/course_gimbal has an identity
+                 pose (all four coincide with the gimbal model frame), and each
+                 mesh is at the identity in its SDF link. The URDF links sit at
+                 their pivots instead, so each mesh is offset by minus its
+                 link's pivot, and then moves with the link exactly as
+                 Gazebo moves it.
+
+    If a mesh ever looks wrong in RViz, check it against the running
+    simulation before touching anything: the joints are the measured TF tree.
+  -->
+  <xacro:property name="mesh_x500" value="package://drone_course_sim/meshes/course_x500_base"/>
+  <xacro:property name="mesh_gimbal" value="package://drone_course_sim/meshes/course_gimbal"/>
+  <xacro:property name="prop_scale" value="0.8461538461538461"/>
+
+  <!-- Every visual names a material, the DAEs included (they keep their own
+       textures regardless). rviz2 looks only at a link's FIRST visual: if that
+       one has no material, every untextured mesh on the link is drawn in
+       RVIZ/ShadedRed, which is how the props came out red. -->
+  <material name="airframe"><color rgba="0.2 0.2 0.2 1"/></material>
+  <material name="prop_grey"><color rgba="0.25 0.25 0.25 1"/></material>
+  <material name="gimbal_grey"><color rgba="0.175 0.175 0.175 1"/></material>
+
+  <xacro:macro name="motor_and_prop" params="x y prop">
+    <visual>
+      <origin xyz="${x} ${y} 0.032" rpy="0 0 -0.45"/>
+      <geometry><mesh filename="${mesh_x500}/5010Base.dae"/></geometry>
+      <material name="airframe"/>
+    </visual>
+    <!-- rotor link at (x, y, 0.06); bell at -0.032 in it -->
+    <visual>
+      <origin xyz="${x} ${y} ${0.06 - 0.032}" rpy="0 0 0"/>
+      <geometry><mesh filename="${mesh_x500}/5010Bell.dae"/></geometry>
+      <material name="airframe"/>
+    </visual>
+    <!-- prop visual at (-0.022, -0.14638..., -0.016) in the rotor link: the
+         mesh origin is not at its hub -->
+    <visual>
+      <origin xyz="${x - 0.022} ${y - 0.14638461538461536} ${0.06 - 0.016}" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="${mesh_x500}/${prop}" scale="${prop_scale} ${prop_scale} ${prop_scale}"/>
+      </geometry>
+      <material name="prop_grey"/>
+    </visual>
+  </xacro:macro>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.025" rpy="0 0 ${pi2*2}"/>
+      <geometry><mesh filename="${mesh_x500}/NXP-HGD-CF.dae"/></geometry>
+      <material name="airframe"/>
+    </visual>
+    <!-- rotor_0..3 of the SDF, same numbering -->
+    <xacro:motor_and_prop x="0.174" y="-0.174" prop="1345_prop_ccw.stl"/>
+    <xacro:motor_and_prop x="-0.174" y="0.174" prop="1345_prop_ccw.stl"/>
+    <xacro:motor_and_prop x="0.174" y="0.174" prop="1345_prop_cw.stl"/>
+    <xacro:motor_and_prop x="-0.174" y="-0.174" prop="1345_prop_cw.stl"/>
+  </link>
+
+  <!-- px pz: the link's pivot in the gimbal model frame; the mesh is drawn
+       at minus that, which is where the SDF has it. -->
+  <xacro:macro name="gimbal_link" params="name mesh px pz">
+    <link name="${name}">
+      <visual>
+        <origin xyz="${-px} 0 ${-pz}" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${mesh_gimbal}/${mesh}" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="gimbal_grey"/>
+      </visual>
+    </link>
+  </xacro:macro>
+
+  <xacro:gimbal_link name="cgo3_mount_link" mesh="cgo3_mount_remeshed_v1.stl"
+                     px="0" pz="0"/>
+  <xacro:gimbal_link name="cgo3_vertical_arm_link" mesh="cgo3_vertical_arm_remeshed_v1.stl"
+                     px="${yaw_px}" pz="0"/>
+  <xacro:gimbal_link name="cgo3_horizontal_arm_link" mesh="cgo3_horizontal_arm_remeshed_v1.stl"
+                     px="0" pz="${roll_pz}"/>
+  <xacro:gimbal_link name="camera_link" mesh="cgo3_camera_remeshed_v1.stl"
+                     px="${pitch_px}" pz="${pitch_pz}"/>
   <link name="camera_optical_frame"/>
 
   <!-- The mount carries a 180 deg yaw, exactly as the model does. It is kept
@@ -45,7 +154,7 @@
   <joint name="cgo3_vertical_arm_joint" type="revolute">   <!-- yaw -->
     <parent link="cgo3_mount_link"/>
     <child link="cgo3_vertical_arm_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="${yaw_px} 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 -1"/>
     <limit lower="${-pi2*4}" upper="${pi2*4}" effort="10" velocity="6"/>
   </joint>
@@ -53,7 +162,8 @@
   <joint name="cgo3_horizontal_arm_joint" type="revolute"> <!-- roll -->
     <parent link="cgo3_vertical_arm_link"/>
     <child link="cgo3_horizontal_arm_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <!-- each origin is this pivot minus the parent's -->
+    <origin xyz="${-yaw_px} 0 ${roll_pz}" rpy="0 0 0"/>
     <axis xyz="-1 0 0"/>
     <limit lower="${-pi2}" upper="${pi2}" effort="10" velocity="6"/>
   </joint>
@@ -61,7 +171,7 @@
   <joint name="cgo3_camera_joint" type="revolute">         <!-- pitch -->
     <parent link="cgo3_horizontal_arm_link"/>
     <child link="camera_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="${pitch_px} 0 ${pitch_pz - roll_pz}" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="${-pi2}" upper="${pi2}" effort="10" velocity="6"/>
   </joint>
@@ -76,12 +186,13 @@
         optical x = camera_link +y  = aircraft right
         optical y = camera_link -z  = aircraft down
         optical z = camera_link -x  = aircraft forward
-    which is what image geometry expects.
+    which is what image geometry expects. The origin moves from the pitch
+    pivot to the sensor, which is where the image is actually taken.
   -->
   <joint name="camera_optical_joint" type="fixed">
     <parent link="camera_link"/>
     <child link="camera_optical_frame"/>
-    <origin xyz="0 0 0" rpy="${-pi2} 0 ${pi2}"/>
+    <origin xyz="${lens_px - pitch_px} 0 0" rpy="${-pi2} 0 ${pi2}"/>
   </joint>
 
 </robot>

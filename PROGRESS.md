@@ -117,6 +117,49 @@ build (~5 min); touching only `ros2_ws/` or `docker/scripts/` is seconds.
 
 ## 6. Done, with the reasoning that is expensive to re-derive
 
+### The aircraft in RViz, and the gimbal frames moved to where the gimbal really pivots
+
+**Gimbal joints now pivot where Gazebo pivots them.** The URDF had all three revolute joints at
+zero translation, i.e. pivoting at the mount, 0.02 m above `base_link`. The SDF's joints pivot
+about their own `<pose>` points, and the pitch pivot is 0.16 m lower, at the camera. Rotations
+were right and positions were not: `camera_optical_frame` sat **16 cm above the lens**, and at
+35° pitch Gazebo's `camera_link` was 0.10 m from where TF put it. `course verify` could not see
+it, because it only checks at zero joint angles, where the link origins do coincide. That is
+also where Step 3 of the spike notes went wrong: the links coincide at the gimbal *model origin*,
+not at the rotation centre.
+
+Each link frame now sits at its joint's pivot, and the optical frame at the camera sensor. Joint
+names, axes, limits, rotations and the mount offset are unchanged, so the build-time mount check
+and every sign convention stand. At zero angles:
+
+| frame | before | now |
+|---|---|---|
+| `cgo3_vertical_arm_link` | (0, 0, 0.02) | (0.026, 0, 0.02), the yaw pivot |
+| `cgo3_horizontal_arm_link` | (0, 0, 0.02) | (0, 0, −0.142), the roll pivot |
+| `camera_link` | (0, 0, 0.02) | (0.041, 0, −0.142), the pitch pivot |
+| `camera_optical_frame` | (0, 0, 0.02) | (0.074, 0, −0.142), the sensor |
+
+Checked against Gazebo link poses at four gimbal poses (level; pitch −35°; pitch −35° with
+yaw +30°; pitch −69° with yaw −46°): worst difference **1.4 mm and 0.5°**, which is sampling
+skew while the gimbal settles, against 99 mm before. `course verify` passes, and `view_frames`
+gives the same frames and parent/child links as before.
+
+Effect on the capstone: none measurable. Six tier-0 runs of the reference solution, same image,
+only the URDF swapped, RTF 1.00: new 40.0 / 81.2 / 76.4, old 81.8 / 32.2 / 84.2. Each URDF
+collapses once in three (see the open issue on early FOLLOW losses), and the rest overlap.
+
+**Visuals.** The URDF now draws the Gazebo meshes, and the lab layout `course.rviz` has a
+RobotModel display. The meshes are installed into the package share by `CMakeLists.txt` straight
+from `models/`, so git holds one copy. The image copies only the package into its workspace, so
+the Dockerfile passes `-DCOURSE_MODELS_DIR` pointing at the PX4 tree, and the build fails if the
+meshes are missing.
+
+**The Day 3 slide image** `day3-frames-on-aircraft.png` is now an RViz screenshot:
+`make_media.sh frames` (RViz config `frames_on_aircraft.rviz`, gimbal at the capstone's 35°).
+The axes come from `tools/media/frame_axes.py`, not the TF display. The TF display draws names
+in white (invisible on the slide's background) and ignored a per-frame filter from the config.
+Its replacement draws frame-locked markers, so every arrow is still placed by the live `/tf`.
+
 ### Gimbal ROS command interface
 
 | Topic | Type | Use |
@@ -333,6 +376,17 @@ Everything on the original list is done. What is left is rehearsal, not construc
   joint gains are where to look if tracking ever needs tighter pointing.
 - The `Pickup` mesh is vendored from Gazebo Fuel (Nate Koenig / Open Robotics). Attribution is
   in `models/README.md`; its licence is not stated in the model metadata.
+- **The URDF's gimbal geometry is the simulated CGO3's, not the A8 mini's.** The pivots and the
+  lens position were measured in Gazebo. On the aircraft the same URDF puts the optical frame
+  wherever the CGO3 would have it. Measure the A8 mini's mount offset, pivot and lens positions
+  at the hardware rehearsal. Until then, expect a few centimetres of lever-arm error on the real
+  aircraft, which is small next to the EKF2 yaw term.
+- **Tier 0 is flaky: 2 of 6 reference runs scored 32-40 / 85** (measured 2026-09-30, while
+  checking the URDF change above; it happened with both URDFs). Each time the track dropped
+  about 6 s after entering FOLLOW, was not reacquired within the mission manager's 15 s
+  window, and the mission broke off to RTL. The other runs scored 76-84. Not investigated. The
+  solutions had uncommitted edits in the working tree at the time, so check whether it
+  reproduces on committed code first.
 
 ## 9. Conventions
 

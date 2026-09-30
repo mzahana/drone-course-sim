@@ -183,7 +183,8 @@ RUN mkdir -p ${COURSE_WS}/src && chown -R ${USERNAME}:${USERNAME} ${COURSE_WS}
 USER ${USERNAME}
 COPY --chown=${USERNAME}:${USERNAME} ros2_ws/src/drone_course_sim ${COURSE_WS}/src/drone_course_sim
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
-    && cd ${COURSE_WS} && colcon build --packages-select drone_course_sim
+    && cd ${COURSE_WS} && colcon build --packages-select drone_course_sim \
+         --cmake-args -DCOURSE_MODELS_DIR=${PX4_DIR}/Tools/simulation/gz/models
 
 USER root
 # --------------------------------------------------------- 5e. Ground station
