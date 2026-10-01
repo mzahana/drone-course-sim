@@ -4,7 +4,18 @@
 (on your host machine: `~/drone_course_shared_volume/ros2_ws/src/lab3_offboard/`).
 `course new lab3` put it there.
 
-**What you write:** `scripts/offboard_square.py` — four `TODO(student)` blocks.
+**What you write:** `scripts/offboard_square.py` — TODO 1 to TODO 4:
+
+| TODO | What to do |
+|---|---|
+| 1 | Build a position setpoint and publish it |
+| 2 | Build a velocity setpoint and publish it |
+| 3 | Return corner i of the square |
+| 4 | Switch to OFFBOARD, then arm, then go to TAKEOFF |
+
+Search the file for `TODO`. Edit only between the `ADD YOUR CODE BELOW` and
+`END OF YOUR CODE` lines; each of those regions starts with a
+`raise NotImplementedError(...)` line that you delete. Everything else is given.
 
 ## What it must do
 

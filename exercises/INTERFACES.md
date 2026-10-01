@@ -52,6 +52,12 @@ of these names.
 
 ## Gimbal limits — the same in simulation and on the real A8 mini
 
+In simulation the `/gimbal/...` topics are served by `gimbal_interface`. On the aircraft they
+are served by an adapter in `hardware/gimbal_adapters/` (for the A8 mini:
+`siyi_gimbal_adapter`, on top of the `siyi_ros2` driver), which also publishes `/joint_states`
+so the TF tree is the same. A different gimbal needs a different adapter, not different
+student code.
+
 | Axis | Range | Commandable |
 |---|---|---|
 | Roll | stabilised only | **no** |

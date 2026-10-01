@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
-"""Lab 5 reference solution, part 1 -- a four-state constant-velocity filter.
+"""Lab 5 reference solution, part 1 -- a constant-velocity Kalman filter for
+the target on the ground.
 
-    x = [x, y, vx, vy]      on the ground plane, in map
+Your tasks:
+    TODO 1  Predict step
+    TODO 2  Update step, with a gate
+Search this file for 'TODO' -- you only need to edit between the
+ADD YOUR CODE BELOW / END OF YOUR CODE lines.
 
-Four states, not six, because the target is on a known plane. Two reasons this
-filter is not optional, both worth saying out loud:
+State:        x = [x, y, vx, vy]   position (m) and velocity (m/s), in map.
+Model:        the target moves at constant velocity; its unknown
+              accelerations are treated as noise (the process noise Q).
+Measurement:  z = [x, y] from /target/estimate, with covariance R.
+Output:       /target/track (nav_msgs/Odometry) with position and velocity.
 
-  * It is the **only** source of the target's velocity, and the guidance law
-    needs it. Differencing consecutive fixes gives you velocity with the
-    measurement noise differentiated too -- at 10 Hz and 0.5 m of noise that is
-    5 m/s of garbage on a 3 m/s target.
-  * It **coasts through dropouts**, which are guaranteed the moment the target
-    is small, shadowed, or clipped by the frame edge.
+The target is on the ground, so 4 states are enough (no height).
 
-R comes from the locator's covariance, not from a constant. A filter told the
-measurement is better than it is will chase noise; told it is worse, it will
-ignore the measurement and drift. Both look like "the filter is badly tuned"
-and neither is.
+Why this filter is needed:
+  * It is the only source of the target's velocity, and the guidance law
+    needs that velocity. Subtracting two noisy positions gives a very noisy
+    velocity: at 10 Hz with 0.5 m of position noise, that is about 5 m/s of
+    noise on a 3 m/s target.
+  * It keeps predicting (it "coasts") when detections stop. That happens
+    whenever the target is small, hidden, or at the edge of the image.
 
-The Mahalanobis gate is what stops one false positive from dragging the track
-across the field. It is three lines and it is the difference between a filter
-and a liability.
+Two design choices:
+  * R is taken from the covariance the locator publishes, not a constant.
+    If R is too small, the filter follows the noise. If R is too large, the
+    filter ignores the measurements and drifts.
+  * A Mahalanobis gate rejects a measurement that is too far from the
+    prediction, so one false detection cannot pull the track away.
+
+Matrices are plain Python lists of rows. The small helpers below do the
+matrix algebra.
 """
 import math
 
@@ -32,20 +44,24 @@ from nav_msgs.msg import Odometry
 
 
 def mat_mul(A, B):
+    """Matrix product A * B."""
     n, m, p = len(A), len(B), len(B[0])
     return [[sum(A[i][k] * B[k][j] for k in range(m)) for j in range(p)] for i in range(n)]
 
 
 def mat_add(A, B):
+    """Matrix sum A + B."""
     return [[A[i][j] + B[i][j] for j in range(len(A[0]))] for i in range(len(A))]
 
 
 def transpose(A):
+    """Matrix transpose A^T."""
     return [list(r) for r in zip(*A)]
 
 
 def inv2(M):
-    d = M[0][0] * M[1][1] - M[0][1] * M[1][0]
+    """Inverse of a 2x2 matrix, or None if it cannot be inverted."""
+    d = M[0][0] * M[1][1] - M[0][1] * M[1][0]     # determinant
     if abs(d) < 1e-12:
         return None
     return [[M[1][1] / d, -M[0][1] / d], [-M[1][0] / d, M[0][0] / d]]
@@ -55,24 +71,26 @@ class TargetTracker(Node):
     def __init__(self):
         super().__init__("target_tracker")
 
-        self.declare_parameter("rate_hz", 20.0)
-        self.declare_parameter("accel_sigma", 1.5)     # m/s^2, process noise
-        self.declare_parameter("gate_chi2", 9.21)      # 2 dof, 99%
-        self.declare_parameter("max_coast", 5.0)       # s before the track dies
-        self.declare_parameter("init_speed_var", 25.0)
+        self.declare_parameter("rate_hz", 20.0)        # predict and publish rate
+        self.declare_parameter("accel_sigma", 1.5)     # m/s^2, std of the target's unknown acceleration
+        # Gate threshold: 9.21 is the 99% chi-square value for 2 degrees of
+        # freedom, so a correct measurement passes the gate 99% of the time.
+        self.declare_parameter("gate_chi2", 9.21)
+        self.declare_parameter("max_coast", 5.0)       # s without a measurement before the track is dropped
+        self.declare_parameter("init_speed_var", 25.0) # (m/s)^2, initial velocity variance (std 5 m/s)
 
-        g = lambda n: self.get_parameter(n).value
+        g = lambda n: self.get_parameter(n).value    # short name for reading a parameter
         self.dt = 1.0 / float(g("rate_hz"))
         self.q_sigma = float(g("accel_sigma"))
         self.gate = float(g("gate_chi2"))
         self.max_coast = float(g("max_coast"))
         self.init_speed_var = float(g("init_speed_var"))
 
-        self.x = None
-        self.P = None
-        self.t_last_update = None
-        self.n_gated = 0
-        self.n_upd = 0
+        self.x = None              # state [x, y, vx, vy]; None = no track yet
+        self.P = None              # 4x4 state covariance
+        self.t_last_update = None  # time of the last accepted measurement (s)
+        self.n_gated = 0           # measurements rejected by the gate (for the log)
+        self.n_upd = 0             # measurements accepted (for the log)
 
         self.pub = self.create_publisher(Odometry, "/target/track", 10)
         self.create_subscription(PoseWithCovarianceStamped, "/target/estimate",
@@ -81,6 +99,7 @@ class TargetTracker(Node):
         self.create_timer(10.0, self._report)
 
     def _now(self):
+        """Current ROS time in seconds (sim time in simulation)."""
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _report(self):
@@ -91,13 +110,30 @@ class TargetTracker(Node):
 
     # ------------------------------------------------------------- predict
     def _predict(self, dt):
-        # F = [[I, dt I], [0, I]]
+        # ------------------------------------------------------------------
+        # TODO 1: Predict step
+        #   - Move the state forward by dt: x_new = F x, with
+        #     F = [[1, 0, dt, 0], [0, 1, 0, dt], [0, 0, 1, 0], [0, 0, 0, 1]]
+        #     (position += dt * velocity; velocity stays the same).
+        #   - Grow the covariance: P_new = F P F^T + Q.
+        #   - Q models an unknown acceleration with standard deviation
+        #     self.q_sigma. With s = q_sigma^2, for each axis (x and y):
+        #       position variance         dt^4 / 4 * s
+        #       position-velocity term    dt^3 / 2 * s
+        #       velocity variance         dt^2 * s
+        #     All other entries of Q are 0.
+        #   - Store the results in self.x and self.P.
+        #   - mat_mul, mat_add and transpose are defined at the top of the file.
+        #   - Try a simple diagonal Q as well, and compare the velocity
+        #     estimate during a detection dropout.
+        # ======================= ADD YOUR CODE BELOW =======================
         x = self.x
         self.x = [x[0] + dt * x[2], x[1] + dt * x[3], x[2], x[3]]
         F = [[1, 0, dt, 0], [0, 1, 0, dt], [0, 0, 1, 0], [0, 0, 0, 1]]
-        # Piecewise-constant white acceleration. Writing Q this way rather than
-        # as a diagonal guess is what makes position and velocity uncertainty
-        # grow together, which is what actually happens.
+        # Q for a random acceleration a that is constant during dt: position
+        # changes by a * dt^2 / 2 and velocity by a * dt, so Q = s * G G^T
+        # with G = [dt^2 / 2, dt]. The off-diagonal terms make the position
+        # and velocity uncertainty grow together, as they do in reality.
         s = self.q_sigma ** 2
         d4, d3, d2 = dt ** 4 / 4.0, dt ** 3 / 2.0, dt ** 2
         Q = [[d4 * s, 0, d3 * s, 0],
@@ -105,17 +141,22 @@ class TargetTracker(Node):
              [d3 * s, 0, d2 * s, 0],
              [0, d3 * s, 0, d2 * s]]
         self.P = mat_add(mat_mul(mat_mul(F, self.P), transpose(F)), Q)
+        # ======================= END OF YOUR CODE ==========================
 
     # -------------------------------------------------------------- update
     def _on_measurement(self, msg):
+        # z = measured position. R = its 2x2 covariance, taken from the
+        # x-y block of the 6x6 ROS covariance (indices 0, 1, 6, 7).
         z = [msg.pose.pose.position.x, msg.pose.pose.position.y]
         c = msg.pose.covariance
         R = [[c[0], c[1]], [c[6], c[7]]]
         if R[0][0] <= 0.0 or R[1][1] <= 0.0:
-            R = [[1.0, 0.0], [0.0, 1.0]]     # a locator that reports nothing
+            R = [[1.0, 0.0], [0.0, 1.0]]     # no covariance was sent: use 1 m^2
 
         now = self._now()
         if self.x is None:
+            # First measurement: start the track here, with zero velocity
+            # and a large velocity variance (we do not know it yet).
             self.x = [z[0], z[1], 0.0, 0.0]
             self.P = [[R[0][0], R[0][1], 0, 0],
                       [R[1][0], R[1][1], 0, 0],
@@ -125,36 +166,58 @@ class TargetTracker(Node):
             self.get_logger().info(f"track initialised at ({z[0]:.1f}, {z[1]:.1f})")
             return
 
-        # S = H P H' + R, with H = [I 0]
+        # ------------------------------------------------------------------
+        # TODO 2: Update step, with a gate
+        #   - H = [I 0] picks the position out of the state. So H x is
+        #     (self.x[0], self.x[1]) and H P H^T is the top-left 2x2 of P.
+        #   - innovation:              nu = z - H x
+        #   - innovation covariance:   S = H P H^T + R
+        #     Invert it with inv2(S). If that returns None, return.
+        #   - gate: d2 = nu^T S^-1 nu. If d2 > self.gate, reject the
+        #     measurement: add 1 to self.n_gated and return.
+        #   - gain:        K = P H^T S^-1   (4x2; P H^T = first two columns of P)
+        #   - state:       x = x + K nu
+        #   - covariance:  P = P - K H P    (H P = first two rows of P)
+        #     Build the new P from the OLD P. Do not change P in place while
+        #     you are still reading from it.
+        #   - At the end, set self.t_last_update = now and add 1 to self.n_upd.
+        #   - Without the gate, one false detection far away pulls the whole
+        #     track across the field.
+        # ======================= ADD YOUR CODE BELOW =======================
+        # S = H P H^T + R, the top-left 2x2 of P plus R.
         S = [[self.P[0][0] + R[0][0], self.P[0][1] + R[0][1]],
              [self.P[1][0] + R[1][0], self.P[1][1] + R[1][1]]]
         Si = inv2(S)
         if Si is None:
             return
         nu = [z[0] - self.x[0], z[1] - self.x[1]]
+        # d2 = nu^T S^-1 nu: the squared Mahalanobis distance, i.e. how many
+        # standard deviations (squared) the measurement is from the prediction.
         d2 = (nu[0] * (Si[0][0] * nu[0] + Si[0][1] * nu[1]) +
               nu[1] * (Si[1][0] * nu[0] + Si[1][1] * nu[1]))
         if d2 > self.gate:
             self.n_gated += 1
             return
 
-        # K = P H' S^-1, H' picks the first two columns of P
+        # K = P H^T S^-1. P H^T is the first two columns of P.
         PHt = [[self.P[i][0], self.P[i][1]] for i in range(4)]
         K = mat_mul(PHt, Si)
         for i in range(4):
             self.x[i] += K[i][0] * nu[0] + K[i][1] * nu[1]
-        # Joseph form is not needed at this size, but subtracting K H P must be
-        # done against the ORIGINAL P, so build the new one rather than editing.
+        # P = P - K H P. H P is the first two rows of P. The new P is built
+        # as a new list, so every entry is computed from the old P.
         HP = [[self.P[0][j] for j in range(4)], [self.P[1][j] for j in range(4)]]
         KHP = mat_mul(K, HP)
         self.P = [[self.P[i][j] - KHP[i][j] for j in range(4)] for i in range(4)]
         self.t_last_update = now
         self.n_upd += 1
+        # ======================= END OF YOUR CODE ==========================
 
     # ---------------------------------------------------------------- loop
     def _tick(self):
         if self.x is None:
             return
+        # Drop the track if no measurement was accepted for max_coast seconds.
         now = self._now()
         age = now - self.t_last_update
         if age > self.max_coast:
@@ -164,8 +227,11 @@ class TargetTracker(Node):
             self.P = None
             return
 
+        # Predict on every tick, with or without a measurement, so the track
+        # keeps moving during a dropout.
         self._predict(self.dt)
 
+        # Publish position and velocity, both in map.
         m = Odometry()
         m.header.stamp = self.get_clock().now().to_msg()
         m.header.frame_id = "map"
@@ -176,6 +242,9 @@ class TargetTracker(Node):
         m.pose.pose.orientation.w = 1.0
         m.twist.twist.linear.x = self.x[2]
         m.twist.twist.linear.y = self.x[3]
+        # 6x6 ROS covariances, stored row by row: index 0 = xx, 1 = xy,
+        # 6 = yx, 7 = yy. The pose gets P's position block, the twist gets
+        # P's velocity block.
         cov = [0.0] * 36
         cov[0], cov[1] = self.P[0][0], self.P[0][1]
         cov[6], cov[7] = self.P[1][0], self.P[1][1]

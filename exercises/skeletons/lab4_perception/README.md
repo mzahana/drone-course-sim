@@ -3,11 +3,19 @@
 **Where this goes:** `~/shared_volume/ros2_ws/src/lab4_perception/`.
 `course new lab4` put it there.
 
-**What you write:**
-* `scripts/target_locator.py` — a detection becomes a position in `map`, with a covariance.
-* `scripts/gimbal_pointer.py` — a pixel error becomes a gimbal rate.
+**What you write:** five TODOs in two files.
 
-Five `TODO(student)` blocks between them. Everything else is scaffolding.
+| File | TODO | What to do |
+|---|---|---|
+| `scripts/target_locator.py` | 1 | Turn the detection's centre pixel into a unit ray |
+| | 2 | Intersect the ray with the ground plane |
+| | 3 | Build the covariance of the ground position (step 4 in the slides) |
+| `scripts/gimbal_pointer.py` | 1 | Turn the pixel offsets into angle errors |
+| | 2 | Run a PID on each axis |
+
+Search each file for `TODO`. Edit only between the `ADD YOUR CODE BELOW` and
+`END OF YOUR CODE` lines; each of those regions starts with a
+`raise NotImplementedError(...)` line that you delete. Everything else is given.
 
 ## What it must do
 
@@ -51,7 +59,8 @@ should be worth most of its 20 points; the rest of the score needs Lab 5.
 
 In RViz — `course rviz` opens the course layout with all of this already configured — the
 ellipse should sit on the target, and it should visibly stretch *along* the line of sight when
-you look down at a shallow angle. If it stays circular, you have not done step 4.
+you look down at a shallow angle. If it stays circular, TODO 3 in `target_locator.py`
+(step 4 in the slides) is not done.
 
 For reference, the solution achieves **0.9–1.1 m RMS** against ground truth at the capstone
 geometry. Most of what is left is not yours to fix: see the yaw note below.
@@ -91,7 +100,7 @@ simulator settles 5–6° away from truth — reproducible with stock PX4 and th
 is not your bug and not the course's. A yaw error rotates the bearing ray about the vertical, so
 it lands about `0.1 × ground range` to one side: 1.6 m at the capstone geometry, more than the
 gimbal, the pixel and the box centre combined. Knowing which term dominates is the point of
-step 4. The same is true on the real aircraft, where the compass is the weakest sensor on board.
+TODO 3. The same is true on the real aircraft, where the compass is the weakest sensor on board.
 
 **Measure the gimbal's sign convention, do not guess it.** Command a rate, watch which way the
 box moves, write the answer down. Guessing costs an hour and looks like a broken control loop:

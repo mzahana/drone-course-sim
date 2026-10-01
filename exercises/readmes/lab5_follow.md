@@ -3,11 +3,21 @@
 **Where this goes:** `~/shared_volume/ros2_ws/src/lab5_follow/`.
 `course new lab5` put it there.
 
-**What you write:**
-* `scripts/target_tracker.py` — a 4-state constant-velocity Kalman filter on the ground plane.
-* `scripts/follow_guidance.py` — the standoff reference, the velocity feedforward, the clamps.
+**What you write:** four TODOs in two files.
 
-Four `TODO(student)` blocks.
+| File | TODO | What to do |
+|---|---|---|
+| `scripts/target_tracker.py` | 1 | Predict step |
+| | 2 | Update step, with a gate |
+| `scripts/follow_guidance.py` | 1 | Compute the standoff reference point |
+| | 2 | Apply the safety limits |
+
+`target_tracker.py` is a 4-state constant-velocity Kalman filter on the ground plane.
+`follow_guidance.py` computes the standoff reference and sends it with a velocity feedforward.
+
+Search each file for `TODO`. Edit only between the `ADD YOUR CODE BELOW` and
+`END OF YOUR CODE` lines; each of those regions starts with a
+`raise NotImplementedError(...)` line that you delete. Everything else is given.
 
 ## What it must do
 
@@ -79,9 +89,9 @@ reference. If the track dies the instant detections stop, your predict step is w
 
 ## The three things that will bite you
 
-**A stopped target has no heading.** `v̂_T` is `v_T/|v_T|` and `|v_T|` goes to zero. Latch the
-last valid heading; a latched bearing is a decision, dividing by zero is a crash. This happens
-on every tier-2 run, and it happens in front of the class.
+**A stopped target has no heading.** `v̂_T` is `v_T/|v_T|` and `|v_T|` goes to zero. Keep the
+last valid heading and use it while the target is stopped; do not divide by a speed near
+zero. This happens on every tier-2 run.
 
 And when you have never had a heading at all, hold the bearing you are already on at distance
 `d` — do **not** sit directly overhead. Overhead throws away the look angle the whole error

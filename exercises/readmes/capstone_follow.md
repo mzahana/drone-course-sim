@@ -3,8 +3,18 @@
 **Where this goes:** `~/shared_volume/ros2_ws/src/capstone_follow/`.
 `course new capstone` put it there.
 
-**What you write:** `scripts/mission_manager.py` — three `TODO(student)` blocks, the state
-machine transitions. Everything else you already built in Labs 4 and 5.
+**What you write:** `scripts/mission_manager.py` — TODO 1 to TODO 3, the state machine
+transitions. Everything else you already built in Labs 4 and 5.
+
+| TODO | What to do |
+|---|---|
+| 1 | In SEARCH, sweep the gimbal and switch to FOLLOW on a track |
+| 2 | In FOLLOW, switch to LOST when the track is lost |
+| 3 | In LOST, wait, then scan, then return home |
+
+Search the file for `TODO`. Edit only between the `ADD YOUR CODE BELOW` and
+`END OF YOUR CODE` lines; each of those regions starts with a
+`raise NotImplementedError(...)` line that you delete.
 
 ```
 IDLE → TAKEOFF → SEARCH → FOLLOW → LOST → RTL
@@ -20,8 +30,8 @@ keeping it in the camera frame, and breaks off safely when it loses it.
 `mission_manager` is the **only** node that arms the aircraft, the only one that asks for a
 mode, and the only one that decides whether guidance is allowed to drive. While `FOLLOW` is
 active, `follow_guidance` owns `/mavros/setpoint_raw/local` and the mission manager publishes
-nothing to it. Two writers to one setpoint topic is a fight, and the later publisher wins,
-which is not a design.
+nothing to it. Two nodes publishing on one setpoint topic would send conflicting
+setpoints.
 
 It publishes its state on `/mission/state` (`std_msgs/String`, one of `TAKEOFF`, `SEARCH`,
 `FOLLOW`, `LOST`, `RTL`) and gates guidance with `/guidance/enable` (`std_msgs/Bool`).

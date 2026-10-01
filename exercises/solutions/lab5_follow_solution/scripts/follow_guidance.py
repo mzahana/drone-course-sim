@@ -1,32 +1,40 @@
 #!/usr/bin/env python3
-"""Lab 5 reference solution, part 2 -- the standoff law, with the clamps.
+"""Lab 5 reference solution, part 2 -- the follow guidance law, with safety
+limits.
+
+Your tasks:
+    TODO 1  Compute the standoff reference point
+    TODO 2  Apply the safety limits
+Search this file for 'TODO' -- you only need to edit between the
+ADD YOUR CODE BELOW / END OF YOUR CODE lines.
+
+The guidance law:
 
     p_des = p_T - d * v_hat_T + h * z_hat
-    v_cmd = v_T + Kp (p_des - p_drone)
+    v_cmd = v_T + Kp * (p_des - p_drone)
 
-The second term is the satisfying one, because students measure it in a single
-run. Without the v_T feedforward, a proportional controller following a target
-at constant speed settles at a permanent lag of
+    p_T, v_T   target position and velocity (from /target/track)
+    v_hat_T    unit vector along the target's velocity (its heading)
+    d, h       standoff distance behind the target, and altitude (m)
+    z_hat      unit vector pointing up
+    p_drone    the aircraft's position
 
-    e_ss = v_T / Kp
+So the reference point p_des is d metres behind the target and h metres up.
 
--- 3 m behind a 3 m/s target with Kp = 1. Adding v_T drives it to zero. Fly it
-both ways; the difference is visible on one plot.
+Velocity feedforward: with only the Kp term, following a target that moves
+at constant speed leaves a constant lag of e_ss = v_T / Kp. Adding v_T to
+the command removes that lag. PX4 computes the Kp term itself (see the
+comment in _tick), so this node sends p_des as the position setpoint and
+v_T as the velocity feedforward. Without the feedforward the lag is about
+3.2 m behind a 3 m/s target; with it, about zero.
 
-The clamps are not decoration. With the drone above and the target on the
-ground, the risk is not collision -- it is **losing the target**, and every
-clamp here is really about how well you can see:
-
-  * an altitude floor, because the ground-plane fix degrades as h -> 0 and the
-    aircraft has nowhere to go;
-  * a speed limit, because a detector running at 10 Hz cannot keep up with an
-    aircraft that outruns its own perception;
-  * a geofence, because a target that drives out of the area must not take the
-    aircraft with it.
-
-Safety goes last, after guidance, and it is allowed to overrule it. That
-ordering is the architectural lesson of the day -- on a real vehicle the flight
-state machine holds this veto and nothing else may write to the controller.
+Safety limits (TODO 2) are applied AFTER the guidance law, so they can
+override it:
+  * altitude floor: the ground position estimate gets worse as the aircraft
+    gets lower, and there is little room to recover;
+  * speed limit: the detector runs at about 10 Hz, and an aircraft that
+    moves too fast loses the target;
+  * geofence: if the target leaves the area, the aircraft must not follow.
 """
 import math
 
@@ -39,12 +47,13 @@ from mavros_msgs.msg import PositionTarget
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Float64
 
+# MAVROS publishes the pose as BEST_EFFORT, so we must subscribe that way.
 SENSOR_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT,
                         history=HistoryPolicy.KEEP_LAST)
 
-# Position plus velocity feedforward: PX4 takes the position as the reference
-# and the velocity as a feedforward term, which is exactly what the law above
-# produces. Acceleration and yaw rate are ignored.
+# type_mask: use position AND velocity (and yaw). PX4 tracks the position
+# and adds the velocity as a feedforward term. Acceleration and yaw rate are
+# ignored.
 POS_PLUS_VEL = (PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY |
                 PositionTarget.IGNORE_AFZ | PositionTarget.IGNORE_YAW_RATE)
 
@@ -54,45 +63,40 @@ class FollowGuidance(Node):
         super().__init__("follow_guidance")
 
         self.declare_parameter("standoff", 18.0)        # d, m behind the target
-        # 12 m up and 18 m back is a 34 degree look-down at 21.6 m slant
-        # range. The look angle is chosen by the DETECTOR, not by the geometry:
-        # measured on this target, at 960 px input,
+        # Why 12 m up and 18 m back: that is a 34 deg look-down angle at
+        # 21.6 m slant range. The angle is chosen for the detector. Measured
+        # detector confidence on this target, at 960 px input:
         #
         #   look-down   30    40    45    50    55    60    70
         #   confidence  0.49  0.51  0.40  0.27  0.13  none  none
         #
-        # COCO has almost no pictures of vehicles taken from above, so a
-        # near-nadir view of a pickup truck is not a thing YOLO was ever taught
-        # to recognise. Past about 50 degrees it stops finding it at all, and
-        # at 60 it confidently reports an aeroplane instead.
-        #
-        # 34 degrees sits in the flat part of that curve with room for the
-        # transients of an approach. It costs accuracy -- the along-range error
-        # is amplified by 1/sin(theta), 1.80 here against 1.41 at 45 degrees --
-        # and that is the right trade, because an accurate fix you never get is
-        # worth nothing. This is the "how well you see determines how you are
-        # allowed to fly" lesson, with numbers.
-        self.declare_parameter("altitude", 12.0)        # h, m above it
-        # Kept because the guidance law is written in terms of it, and because
-        # a team may want to close the position loop themselves. PX4's own
-        # MPC_XY_P plays this role by default; see the comment in _tick.
+        # The detector's training set (COCO) has very few vehicles seen from
+        # above, so past about 50 deg it stops finding the truck (at 60 deg it
+        # reports an aeroplane instead). 34 deg is in the flat part of the
+        # curve, with margin for the approach.
+        # The cost is accuracy: the along-range error grows by 1/sin(theta),
+        # which is 1.80 at 34 deg against 1.41 at 45 deg. A less accurate fix
+        # is better than no fix, so this is the right choice.
+        self.declare_parameter("altitude", 12.0)        # h, m above the target
+        # kp is not used in the command: PX4's own gain MPC_XY_P does this job
+        # (see the comment in _tick). It is kept because the law is written
+        # with it, and a team may want to close the position loop themselves.
         self.declare_parameter("kp", 1.0)               # 1/s
-        self.declare_parameter("feedforward", True)     # turn off to see e_ss
-        self.declare_parameter("max_speed", 8.0)        # m/s, detector-limited
-        self.declare_parameter("altitude_floor", 5.0)
-        self.declare_parameter("geofence_radius", 100.0)
-        self.declare_parameter("track_timeout", 1.0)
+        self.declare_parameter("feedforward", True)     # set False to see the lag
+        self.declare_parameter("max_speed", 8.0)        # m/s, limited by the detector
+        self.declare_parameter("altitude_floor", 5.0)   # m, never command lower
+        self.declare_parameter("geofence_radius", 100.0)  # m from the map origin
+        self.declare_parameter("track_timeout", 1.0)    # s, older tracks are ignored
         self.declare_parameter("rate_hz", 20.0)
-        self.declare_parameter("min_speed_for_heading", 0.7)
-        # The heading is low-pass filtered. Taking it raw from the filter makes
-        # the standoff reference whip through a wide arc every time the target
-        # turns, and the aircraft spends the turn chasing a point that is
-        # moving faster than it is. Two seconds of smoothing costs a little lag
-        # on a genuine turn and removes most of that.
+        self.declare_parameter("min_speed_for_heading", 0.7)   # m/s
+        # The target's heading is low-pass filtered with time constant
+        # heading_tau. Without it, the reference point swings quickly around
+        # the target every time the target turns, and the aircraft chases it.
+        # 2 s of smoothing adds a little lag on real turns.
         self.declare_parameter("heading_tau", 2.0)      # s
-        self.declare_parameter("start_enabled", True)
+        self.declare_parameter("start_enabled", True)   # the capstone starts it disabled
 
-        g = lambda n: self.get_parameter(n).value
+        g = lambda n: self.get_parameter(n).value    # short name for reading a parameter
         self.d = float(g("standoff"))
         self.h = float(g("altitude"))
         self.kp = float(g("kp"))
@@ -105,10 +109,10 @@ class FollowGuidance(Node):
         self.heading_tau = float(g("heading_tau"))
         self.enabled = bool(g("start_enabled"))
 
-        self.track = None          # (t, x, y, vx, vy)
-        self.pose = None
-        self.heading = None        # latched unit heading of the target
-        self.yaw_rate_req = 0.0
+        self.track = None          # (t, x, y, vx, vy) of the target, in map
+        self.pose = None           # aircraft position (ENU, m)
+        self.heading = None        # last valid unit heading of the target (kept when it stops)
+        self.yaw_rate_req = 0.0    # turn request from gimbal_pointer (not used here)
 
         self.sp = self.create_publisher(PositionTarget, "/mavros/setpoint_raw/local", 10)
         self.pub_des = self.create_publisher(PoseStamped, "/guidance/reference", 1)
@@ -125,6 +129,7 @@ class FollowGuidance(Node):
             f"(the proportional term is PX4's MPC_XY_P)")
 
     def _now(self):
+        """Current ROS time in seconds (sim time in simulation)."""
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _on_track(self, msg):
@@ -135,6 +140,7 @@ class FollowGuidance(Node):
         self.pose = msg.pose.position
 
     def _on_enable(self, msg):
+        # The mission manager turns guidance on and off with /guidance/enable.
         if msg.data != self.enabled:
             self.get_logger().info(f"guidance {'enabled' if msg.data else 'disabled'}")
         self.enabled = msg.data
@@ -147,66 +153,89 @@ class FollowGuidance(Node):
             return
         t, tx, ty, tvx, tvy = self.track
         if self._now() - t > self.track_timeout:
-            return              # stale track: say nothing rather than guess
+            return              # old track: publish nothing rather than guess
 
-        # --- the reference ------------------------------------------------
+        # --- the reference point ------------------------------------------
+        # ------------------------------------------------------------------
+        # TODO 1: Compute the standoff reference point
+        #   - The target is at (tx, ty) and moves at (tvx, tvy). Use self.d
+        #     (standoff) and self.h (altitude). Produce px, py, pz.
+        #   - Formula: p_des = p_T - d * v_hat_T + h * z_hat, where v_hat_T is
+        #     the target's unit heading (velocity divided by speed).
+        #   - Only compute a new heading when the speed is above
+        #     self.min_speed. Below that the heading is not defined (you would
+        #     divide by almost zero). Keep the last valid heading in
+        #     self.heading and use it while the target is slow or stopped.
+        #   - Optional: smooth the heading with time constant self.heading_tau.
+        #   - If there has never been a heading (self.heading is None), stay on
+        #     the line from the target to the aircraft, at distance d. Do NOT
+        #     fly directly overhead: the look angle is lost, and the detector
+        #     does not recognise vehicles seen from straight above.
+        # ======================= ADD YOUR CODE BELOW =======================
         speed = math.hypot(tvx, tvy)
         if speed > self.min_speed:
-            hx, hy = tvx / speed, tvy / speed
+            hx, hy = tvx / speed, tvy / speed      # unit heading of the target
             if self.heading is None:
                 self.heading = (hx, hy)
             else:
+                # First-order low-pass filter: a = dt / tau, with dt = 1/20 s
+                # (the default rate_hz). Then rescale to length 1.
                 a = min(1.0, (1.0 / 20.0) / max(self.heading_tau, 1e-3))
                 bx = self.heading[0] + a * (hx - self.heading[0])
                 by = self.heading[1] + a * (hy - self.heading[1])
                 n = math.hypot(bx, by)
                 if n > 1e-6:
                     self.heading = (bx / n, by / n)
-        # When the target stops, v_hat is undefined. Latching the last valid
-        # heading keeps the aircraft where it was rather than snapping
-        # overhead, and a latched bearing is a decision -- dividing by a speed
-        # of zero is a crash.
+        # If the target is slow or stopped, the code above leaves
+        # self.heading unchanged, so the last valid heading is used.
         if self.heading is None:
-            # Hold the bearing we are already on, at the standoff distance.
+            # No heading yet: stay on the current bearing from the target to
+            # the aircraft, at distance d.
             #
-            # The tempting fallback -- sit directly overhead -- was tried and
-            # is wrong twice over. It throws away the look angle the whole
-            # error model is built on, and it puts the camera at nadir, where
-            # a top-down truck stops looking like anything COCO was trained on:
-            # measured, detections went to zero the moment the aircraft arrived
-            # over a stationary target, and the mission went to LOST while
-            # hovering directly above a truck in plain view.
+            # Hovering directly overhead was tried and failed. The camera then
+            # looks straight down, the detector stopped seeing the truck, and
+            # the mission went to LOST while hovering right above it.
             bx, by = self.pose.x - tx, self.pose.y - ty
             n = math.hypot(bx, by)
             if n > 0.5:
                 px, py = tx + self.d * bx / n, ty + self.d * by / n
             else:
-                px, py = tx + self.d, ty       # any bearing beats none
+                px, py = tx + self.d, ty       # too close to tell a bearing: use East
         else:
+            # Stand d metres behind the target, along its heading.
             px = tx - self.d * self.heading[0]
             py = ty - self.d * self.heading[1]
         pz = self.h
+        # ======================= END OF YOUR CODE ==========================
 
-        # The velocity field is a FEEDFORWARD, so it carries the target's
-        # velocity and nothing else. The proportional term of
+        # Velocity: only the target's velocity, as a feedforward.
         #
-        #     v_cmd = v_T + Kp (p_des - p_drone)
+        # The Kp * (p_des - p_drone) term of the law is computed by PX4 from
+        # the position setpoint we send, with its own gain MPC_XY_P (0.95 by
+        # default). Do not add our own Kp term here as well: the total gain
+        # roughly doubles and the aircraft overshoots. Measured: it flew 5 m
+        # past a stationary target, the target ended up behind the camera,
+        # and it was lost.
         #
-        # is computed by PX4, from the position setpoint we are already
-        # sending, with its own gain MPC_XY_P (0.95 by default). Adding our own
-        # Kp term on top does not make the loop tighter, it makes the gain
-        # roughly double and the approach overshoot: measured, the aircraft ran
-        # 5 m past a stationary target, put it behind the camera, and lost it.
-        #
-        # So the lag experiment is unchanged and still honest. With the
-        # feedforward off, the steady-state lag is v_T / MPC_XY_P -- about 3.2 m
-        # behind a 3 m/s target. With it on, it goes to zero. Read MPC_XY_P
-        # with: ros2 param get /mavros/param MPC_XY_P
+        # With feedforward off, the steady lag is v_T / MPC_XY_P: about 3.2 m
+        # behind a 3 m/s target. With it on, the lag is about zero.
+        # Read the gain with: ros2 param get /mavros/param MPC_XY_P
         vx = tvx if self.use_ff else 0.0
         vy = tvy if self.use_ff else 0.0
         vz = 0.0
 
-        # --- the clamps, applied after the law and allowed to overrule it --
+        # --- the safety limits, applied after the law so they always win ---
+        # ------------------------------------------------------------------
+        # TODO 2: Apply the safety limits
+        #   - Speed: if the horizontal speed hypot(vx, vy) is above self.vmax,
+        #     scale vx and vy by the SAME factor. Limiting each one on its own
+        #     would also change the direction of travel.
+        #   - Altitude floor: pz must not be below self.floor.
+        #   - Geofence: if the reference (px, py) is farther than self.fence
+        #     from the map origin, scale it back onto the circle of radius
+        #     self.fence.
+        #   - Keep this block after the guidance law, so the limits always win.
+        # ======================= ADD YOUR CODE BELOW =======================
         sp_h = math.hypot(vx, vy)
         if sp_h > self.vmax:
             vx, vy = vx * self.vmax / sp_h, vy * self.vmax / sp_h
@@ -214,24 +243,27 @@ class FollowGuidance(Node):
         r = math.hypot(px, py)
         if r > self.fence:
             px, py = px * self.fence / r, py * self.fence / r
+        # ======================= END OF YOUR CODE ==========================
 
-        # Point the nose at the target. It costs nothing and it keeps the
-        # aircraft's own sensors, and the gimbal's yaw travel, centred.
+        # Point the nose at the target. This keeps the target near the
+        # middle of the gimbal's yaw range.
         yaw = math.atan2(ty - self.pose.y, tx - self.pose.x)
 
         m = PositionTarget()
         m.header.stamp = self.get_clock().now().to_msg()
-        m.coordinate_frame = PositionTarget.FRAME_LOCAL_NED   # MAVROS: this is ENU
+        m.coordinate_frame = PositionTarget.FRAME_LOCAL_NED   # MAVROS converts: values are ENU
         m.type_mask = POS_PLUS_VEL
         m.position.x, m.position.y, m.position.z = px, py, pz
         m.velocity.x, m.velocity.y, m.velocity.z = vx, vy, vz
         m.yaw = yaw
         self.sp.publish(m)
 
+        # Also publish the reference point, for RViz.
         ref = PoseStamped()
         ref.header = m.header
         ref.header.frame_id = "map"
         ref.pose.position.x, ref.pose.position.y, ref.pose.position.z = px, py, pz
+        # Yaw-only quaternion: z = sin(yaw / 2), w = cos(yaw / 2).
         ref.pose.orientation.z = math.sin(yaw / 2.0)
         ref.pose.orientation.w = math.cos(yaw / 2.0)
         self.pub_des.publish(ref)
