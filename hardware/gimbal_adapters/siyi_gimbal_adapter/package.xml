@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>siyi_gimbal_adapter</name>
+  <version>0.1.0</version>
+  <description>
+    Connects the course gimbal topics (/gimbal/..., radians) to the siyi_ros2 driver
+    (/siyi/..., degrees), so gimbal_pointer runs unchanged on the real A8 mini.
+  </description>
+  <maintainer email="mohamedashraf123@gmail.com">Mohamed Abdelkader</maintainer>
+  <license>TODO: same licence as the course repo (none chosen yet)</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>siyi_msgs</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

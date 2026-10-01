@@ -1,0 +1,24 @@
+# siyi_gimbal_adapter parameters for the X500 V2 + SIYI A8 mini.
+siyi_gimbal_adapter:
+  ros__parameters:
+    # SIYI direction relative to the course, per axis (+1 = same, -1 = flipped).
+    # Confirm with the bench check in README.md before the first flight.
+    roll_sign: 1.0
+    pitch_sign: 1.0
+    yaw_sign: 1.0
+
+    # A8 mini travel, the same as the simulated gimbal and the siyi_ros2 defaults.
+    pitch_min_deg: -90.0
+    pitch_max_deg: 25.0
+    yaw_min_deg: -135.0
+    yaw_max_deg: 135.0
+    limit_margin_deg: 1.0
+    saturation_hold: 0.3
+
+    attitude_timeout: 1.0
+
+    # Joint names of the course URDF, so robot_state_publisher builds the same TF tree.
+    publish_joint_states: true
+    joint_yaw: cgo3_vertical_arm_joint
+    joint_roll: cgo3_horizontal_arm_joint
+    joint_pitch: cgo3_camera_joint

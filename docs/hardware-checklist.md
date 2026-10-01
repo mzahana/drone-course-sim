@@ -139,6 +139,9 @@ with a hand on the battery connector.
       Getting this wrong makes every TF lookup silently wrong, exactly as in SITL.
 - [ ] A8 mini reachable; the SIYI driver starts without errors.
 - [ ] Gimbal responds to an angle command, moves smoothly, and returns measured attitude.
+- [ ] `siyi_gimbal_adapter` running; its **bench check** passed (pitch and yaw signs, stop on
+      Ctrl-C, straight down, TF). See `hardware/gimbal_adapters/siyi_gimbal_adapter/README.md`.
+      Signs used: pitch ___  yaw ___ . SIYI angles are joint / horizon referenced: ______ .
 - [ ] Gimbal travel checked to the limits used in the course: **pitch −90° to +25°, yaw ±135°.**
       It must reach **90° straight down** — the geolocation maths depends on it.
 - [ ] Video stream arrives, is in focus, and is not upside down.

@@ -179,6 +179,17 @@ which block the executor and are unusable in a 30 Hz pixel-error loop.
 PX4 does not fight this: `GZGimbal::Run()` publishes joint commands only inside
 `if (pollSetpoint())`, i.e. only when a new setpoint arrives. It does **not** stream.
 
+### Gimbal on the real aircraft: `hardware/gimbal_adapters/siyi_gimbal_adapter`
+
+The student code only knows `/gimbal/...` (radians). On the aircraft, `siyi_gimbal_adapter`
+maps those onto the `siyi_ros2` driver (`/siyi/...`, degrees), turns `/siyi/attitude` into
+`/gimbal/attitude`, `/gimbal/saturated` and `/joint_states` (same joint names as the sim, so the
+same TF tree). Chosen over rewriting the course interface to SIYI's, so the gimbal can be
+swapped by writing one new adapter. Not in the sim image (it needs `siyi_msgs`); built on the
+onboard computer next to the driver. Tested against fake driver traffic with the real
+`siyi_msgs`; **not yet run on the real A8 mini**. The signs default to +1 (both sides use pitch
+negative = down, yaw positive = right) and must be confirmed with the bench check in its README.
+
 ### Self-contained simulation assets
 
 `models/` holds `course_x500_base`, `course_x500`, `course_gimbal`, `x500_course_gimbal`;
@@ -361,6 +372,11 @@ Everything on the original list is done. What is left is rehearsal, not construc
 
 ## 8. Open issues
 
+- **Does `/siyi/attitude` report joint angles or horizon-referenced angles?** The TF tree needs
+  joint angles (relative to the airframe). If the A8 mini reports horizon-referenced pitch and
+  roll, the aircraft TF is off by the aircraft's tilt. Check and fix are in
+  `hardware/gimbal_adapters/siyi_gimbal_adapter/README.md` (the fix is publishing the 0x26
+  encoder angles from `siyi_ros2`).
 - **EKF2 yaw sits 5-6° off simulator truth.** Not ours: reproduced with stock PX4, the stock
   x500 and the stock world. It is the largest single term in the geolocation error budget
   (a yaw error rotates the bearing ray about the vertical, so ~0.1 × ground range of lateral
