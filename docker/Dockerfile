@@ -171,15 +171,16 @@ COPY --chown=${USERNAME}:${USERNAME} models/course_gimbal ${PX4_DIR}/Tools/simul
 COPY --chown=${USERNAME}:${USERNAME} models/x500_course_gimbal ${PX4_DIR}/Tools/simulation/gz/models/x500_course_gimbal
 COPY --chown=${USERNAME}:${USERNAME} models/course_target_vehicle ${PX4_DIR}/Tools/simulation/gz/models/course_target_vehicle
 COPY --chown=${USERNAME}:${USERNAME} models/course_ground ${PX4_DIR}/Tools/simulation/gz/models/course_ground
+COPY --chown=${USERNAME}:${USERNAME} models/course_landing_pad ${PX4_DIR}/Tools/simulation/gz/models/course_landing_pad
 RUN M=${PX4_DIR}/Tools/simulation/gz/models \
     && python3 -c "import xml.dom.minidom as m, sys; \
 [m.parse(f) for f in sys.argv[1:]]; print('course SDF xml ok')" \
          $M/course_x500_base/model.sdf $M/course_x500/model.sdf \
          $M/course_gimbal/model.sdf $M/x500_course_gimbal/model.sdf \
-         $M/course_target_vehicle/model.sdf \
+         $M/course_target_vehicle/model.sdf $M/course_landing_pad/model.sdf \
          ${PX4_DIR}/Tools/simulation/gz/worlds/course_world.sdf \
     && ! grep -rhoE 'model://[a-z0-9_]+' $M/course_x500_base $M/course_x500 \
-         $M/course_gimbal $M/x500_course_gimbal $M/course_target_vehicle \
+         $M/course_gimbal $M/x500_course_gimbal $M/course_target_vehicle $M/course_landing_pad \
          | sort -u | grep -v '^model://course' \
     && echo 'course models are self-contained'
 

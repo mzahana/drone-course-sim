@@ -45,7 +45,7 @@ doctor() {
     else bad "px4 binary not built"; fi
     [ -f "$PX4_DIR/ROMFS/px4fmu_common/init.d-posix/airframes/4090_gz_x500_course_gimbal" ] \
         && ok "course gimbal airframe available" || bad "course gimbal airframe missing"
-    for m in course_x500_base course_x500 course_gimbal x500_course_gimbal course_target_vehicle; do
+    for m in course_x500_base course_x500 course_gimbal x500_course_gimbal course_target_vehicle course_landing_pad; do
         [ -d "$PX4_DIR/Tools/simulation/gz/models/$m" ] \
             && ok "model $m installed" || bad "model $m missing"
     done

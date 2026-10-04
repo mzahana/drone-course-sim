@@ -51,6 +51,15 @@
       <name>course_ground</name>
       <pose>0 0 0 0 0 0</pose>
     </include>
+    <!-- The pad the aircraft spawns on, at the origin. Visual only, no
+         collision, so take-off and landing are exactly what they were without
+         it; see models/course_landing_pad/make_pad.py. Its arrow points +x,
+         the aircraft's nose at spawn. -->
+    <include>
+      <uri>model://course_landing_pad</uri>
+      <name>course_landing_pad</name>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
     <light name="sunUTC" type="directional">
       <pose>0 0 500 0 -0 0</pose>
       <cast_shadows>true</cast_shadows>
