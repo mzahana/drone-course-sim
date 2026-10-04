@@ -55,9 +55,14 @@ Most are ROS 2 Humble and need a Jazzy port. They live under
 
 ```bash
 cd ~/src/drone-course-sim
-docker build -t drone-course-sim:jazzy -f docker/Dockerfile .   # context is the REPO ROOT
-./run.sh                                                        # or see the test recipe below
+./build.sh          # GPU image (:jazzy-gpu) if Docker can use an NVIDIA GPU, else :jazzy
+./run.sh --fresh    # new container from the newest image; plain ./run.sh re-enters
 ```
+
+`build.sh --cpu` / `--gpu` force a variant; the raw command is
+`docker build --build-arg TORCH_VARIANT=cpu|cu128 -t ... -f docker/Dockerfile .` (context is the
+REPO ROOT). GPU detection for all three scripts is `docker/gpu.sh`. This host has an RTX 5090,
+so it gets the GPU image; test the CPU path with `./build.sh --cpu` and `./run.sh --cpu`.
 
 Inside the container:
 

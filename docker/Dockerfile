@@ -52,21 +52,31 @@ RUN /opt/ros/${ROS_DISTRO}/lib/mavros/install_geographiclib_datasets.sh
 #   * numpy MUST stay on the 1.x that ROS Jazzy was built against. Letting pip
 #     resolve numpy 2.x breaks cv_bridge at import time -- and pip cannot even
 #     replace it, because the system numpy came from dpkg and has no RECORD file.
-#   * torch comes from the CPU index. The default PyPI wheel drags in
+#   * torch comes from the CPU index by default. The CUDA wheels drag in
 #     cuda-toolkit, cudnn, cublas and triton -- about 3 GB that most student
-#     laptops cannot use. A CUDA variant of this image is a separate build.
+#     laptops cannot use. TORCH_VARIANT=cu128 builds the GPU image instead;
+#     build.sh picks it when it finds an NVIDIA GPU that Docker can use, and
+#     tags the result drone-course-sim:jazzy-gpu. cu128 is the oldest variant
+#     with kernels for RTX 50-series cards; cu126 suits an older driver.
+ARG TORCH_VARIANT=cpu
 RUN echo "numpy<2" > /tmp/constraints.txt \
     && pip3 install --no-cache-dir --break-system-packages -c /tmp/constraints.txt \
-         --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+         --index-url https://download.pytorch.org/whl/${TORCH_VARIANT} torch torchvision \
     && pip3 install --no-cache-dir --break-system-packages -c /tmp/constraints.txt \
          ultralytics onnxruntime \
     && rm /tmp/constraints.txt
 
 # Guard: if these imports ever fail the image is broken for every perception lab,
 # so fail the build here rather than in front of the class.
+# The torch check is there because pip will happily satisfy `torch` from a
+# cache or a second index, and a GPU image with a CPU torch looks fine until
+# someone asks why inference is slow.
 RUN python3 -c "import numpy, cv2, torch, ultralytics; \
     assert numpy.__version__.startswith('1.'), numpy.__version__; \
+    assert torch.__version__.endswith('+${TORCH_VARIANT}'), \
+        'wanted torch +${TORCH_VARIANT}, got ' + torch.__version__; \
     print('numpy', numpy.__version__, '| torch', torch.__version__)"
+ENV COURSE_TORCH=${TORCH_VARIANT}
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && python3 -c "import cv_bridge; print('cv_bridge ok')"
 
 # Bake the weights in so no student ever waits on a download mid-lab.

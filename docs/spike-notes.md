@@ -529,3 +529,38 @@ supposed to run the rest. Every cleanup after it silently never ran, and a secon
 started beside the first: duplicate `robot_state_publisher`s, one publishing the old URDF. Write
 the pattern as `"[r]obot_state_publisher"`, which matches the process but not itself. Same family
 as note 40.
+
+**45. The GPU image existed, and its recipe did not.** On 2026-09-28 both images were built from
+a Dockerfile with a `TORCH_VARIANT` argument, and `course doctor` in them prints a
+`TORCH_VARIANT=cu128` build command, but that version never reached git: the committed Dockerfile
+hard-coded the CPU index, and the docs promised "a separate tag" that nothing could produce. The
+`docker history` of an image is the only place such a recipe survives, which is how this was
+found. It now lives in `build.sh` + `docker/gpu.sh`. Detect the GPU by asking Docker
+(`docker run --gpus all ... true`, 0.3 s), not by reading `docker info`, which lists no runtime
+on Docker Desktop.
+
+The rendering fix from note 38 was only ever applied in `tools/media/make_media.sh`; `course sim`
+now applies it too. Measured on 2026-10-01 in a fresh `:jazzy-gpu` container on this host (RTX
+5090, idle, browser desktop): `course sim` held a real-time factor of **1.00**, and so did a plain
+`make px4_sitl ...` **without** the fix, although its log shows EGL failing on the NVIDIA card
+(`libEGL warning: failed to open /dev/dri/renderD128`, `driver (null)`) -- which turned out to
+be note 46, not a missing vendor setting. So this machine has the
+CPU to render in software at real time when nothing else is running; the 0.38 in note 38 was under
+the media pipeline's load. A student laptop has neither the CPU nor the headroom, which is why
+the fix is applied rather than left to the troubleshooting page. Same container, YOLO11n at
+imgsz 960 on the aerial self-test frame, 50 frames after 5 warm-up: **5.9 ms** GPU (2.0 ms of it
+inference), **20.8 ms** CPU. That CPU figure is not comparable with the 42 ms the course quotes at 960 px,
+which was measured separately; it is recorded here for the method, not to replace it.
+
+**46. On a Wayland desktop every OpenGL window was black.** Reported 2026-10-04 after
+`./run.sh --fresh` on the reference machine (Ubuntu, GNOME on Wayland, NVIDIA 580): `course sim`
+and `course qgc` both opened windows that stayed black. Captured with `import -window`, the
+QGroundControl window was every pixel 0. The container's X11 clients reach the desktop through
+XWayland, and NVIDIA's GLX there exchanges buffers through the render node `/dev/dri/renderD128`,
+which is `crw-rw---- root:render` (gid 992 on this host). The container user was in `video` (44)
+but not 992, so the open failed with `Permission denied`, logged as a libEGL warning and nothing
+else. `--privileged` exposes the device; it does not make it openable by a non-root user. Adding
+gid 992 by hand made QGroundControl draw; `run.sh` now passes `--group-add` with the numeric gid
+of every `/dev/dri` node, which `docker exec` sessions inherit, and with that a fresh container
+showed Gazebo, textured ground and all, at a real-time factor of 1.00. The media pipeline never
+hit this because it renders into Xvfb, not the desktop. `course doctor` now checks the node.

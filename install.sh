@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # One-time setup on a student machine.
 set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+source docker/gpu.sh
 
 # Override IMAGE to pull from somewhere else. The default is the published
 # course image; a locally built one is tagged drone-course-sim:jazzy and is
@@ -40,10 +42,30 @@ else
         echo
         echo "Could not pull ${IMAGE}."
         echo "Build it locally instead (slow, about 30 minutes):"
-        echo "    docker build -t ${LOCAL_TAG} -f docker/Dockerfile ."
+        echo "    ./build.sh"
         exit 1
     fi
 fi
+
+# GPU. The published image is the CPU one: it is what every lab is sized for,
+# and the CUDA build is 3 GB larger. A machine that can use the GPU builds
+# its own GPU image with build.sh; run.sh then prefers it.
+detect_gpu
+case "${GPU_STATE}" in
+    ok)
+        if docker image inspect "${GPU_TAG}" >/dev/null 2>&1; then
+            echo "  ok    NVIDIA GPU usable from Docker, and ${GPU_TAG} is built"
+        else
+            echo "  ok    NVIDIA GPU usable from Docker"
+            echo "        Gazebo will render on it. For YOLO on the GPU too, build the GPU image"
+            echo "        (optional, about 30 minutes):  ./build.sh"
+        fi ;;
+    driver)
+        echo "  warn  NVIDIA GPU found, but Docker cannot use it"
+        gpu_toolkit_hint ;;
+    *)
+        echo "  ok    no NVIDIA GPU -- everything runs on the CPU, which the labs are sized for" ;;
+esac
 
 # Ask for a lot of disk before finding out the hard way at 90%.
 AVAIL_GB=$(df -BG --output=avail /var/lib/docker 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)
@@ -54,3 +76,4 @@ fi
 echo
 echo "Done. Start the container with:  ./run.sh"
 echo "Then inside it run:             course doctor"
+echo "After rebuilding the image:     ./run.sh --fresh"

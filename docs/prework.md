@@ -99,8 +99,11 @@ path has headroom. Every lab and the entire
 capstone are designed around CPU inference. If `nvidia-smi` is not a command on your machine,
 skip this whole section — you are not missing anything.
 
-If you *do* have an NVIDIA GPU and the proprietary driver installed, install the NVIDIA Container
-Toolkit so the container can see it:
+If you *do* have an NVIDIA GPU, it is worth ten minutes: Gazebo renders on it, which is what keeps
+the simulation at real time (more on why that matters below), and YOLO can run on it too.
+
+**Ubuntu.** With the proprietary NVIDIA driver installed (`nvidia-smi` prints your GPU), install
+the NVIDIA Container Toolkit so containers can use the GPU:
 
 <https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html>
 
@@ -109,16 +112,48 @@ Then:
 ```bash
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
-docker run --rm --gpus all ubuntu nvidia-smi
+docker run --rm --gpus all ubuntu:24.04 nvidia-smi
 ```
 
-That last command must print your GPU. `run.sh` detects the NVIDIA runtime automatically and adds
-`--gpus all` when it finds it; when it does not, it prints `[run] no NVIDIA runtime — running on
-CPU` and carries on. Both are correct outcomes.
+That last command must print your GPU.
 
-Note that the default image ships the **CPU build of PyTorch** deliberately: the CUDA wheels pull
-roughly 3 GB of `cuda-toolkit`, `cudnn`, `cublas` and `triton` that most laptops cannot use. A
-CUDA image is a separate tag, not the default.
+**Windows (WSL2).** Install the normal NVIDIA driver **on Windows**, and nothing GPU-related
+inside Ubuntu: **do not install a Linux NVIDIA driver in WSL2**, it replaces the one Windows
+provides and breaks it. In the WSL2 Ubuntu terminal, `nvidia-smi` should already print your GPU.
+Then install the NVIDIA Container Toolkit inside WSL2 exactly as for Ubuntu above, and run the
+same three commands. `run.sh` adds what WSL2 needs on top (`/dev/dxg`, the Windows GPU
+libraries, and Mesa's `d3d12` driver for Gazebo). *This path follows Microsoft's and NVIDIA's
+documentation and has not yet been tested on a course machine; if it fails for you, tell the
+instructor and use the CPU path, which works.*
+
+### What the scripts do with it
+
+You do not choose an image or pass any GPU flags. Every script asks Docker directly whether a
+container can use the GPU (`docker run --gpus all`), and acts on the answer:
+
+| Script | No GPU | GPU, but Docker cannot use it | GPU usable from Docker |
+|---|---|---|---|
+| `install.sh` | pulls the CPU image | says to install the Container Toolkit | pulls the CPU image, suggests `./build.sh` |
+| `build.sh` | builds `drone-course-sim:jazzy` | builds the CPU image, says why | builds **`drone-course-sim:jazzy-gpu`** (CUDA PyTorch) |
+| `run.sh` | CPU container | CPU container, says why | `--gpus all`, and the GPU image if you built it |
+
+There is no published GPU image: the CUDA build of PyTorch adds roughly 3 GB of `cuda-toolkit`,
+`cudnn`, `cublas` and `triton` that most laptops cannot use. If you want YOLO on your GPU, build
+it once (about 30 minutes), then start a new container from it:
+
+```bash
+./build.sh            # detects the GPU and builds drone-course-sim:jazzy-gpu
+./run.sh --fresh      # new container from the new image; your shared folder is kept
+```
+
+Without the GPU image you still get GPU **rendering** from the CPU image, and that is the half
+that matters most. A simulator that cannot keep up runs slower than real time, and a slow
+simulation is an *easier* one: every delay that makes following hard is measured in simulated
+seconds. While recording the course media on the reference machine, software rendering gave a
+real-time factor of **0.38**; GPU rendering, **1.00**.
+
+On the GPU image, YOLO11n at the course's 960 px takes **5.9 ms** a frame on the reference
+machine's RTX 5090 (spike note 45 has the method).
 
 ---
 
@@ -143,7 +178,8 @@ git clone <repo-url> && cd drone-course-sim
 2. creates the shared workspace at `~/drone_course_shared_volume/ros2_ws/src`;
 3. pulls the image unless it is already present, and tags it locally as `drone-course-sim:jazzy`
    — which is the name `run.sh` looks for;
-4. warns you if there is less than 20 GB free where Docker keeps its images.
+4. checks for an NVIDIA GPU Docker can use, and tells you what to do about it (section 4);
+5. warns you if there is less than 20 GB free where Docker keeps its images.
 
 The pull is the long part: **about 3.7 GB down, about 14 GB on disk after unpacking.** Start it
 on a connection you trust and leave it. Check you have the space first:
@@ -176,11 +212,25 @@ you write *outside* that folder inside the container **is** lost — so do not p
 command you use all week. It prints what it decided:
 
 ```
-[run] no NVIDIA runtime — running on CPU
+[run] no NVIDIA GPU -- running on CPU
+[run] new container 'drone-course' from drone-course-sim:jazzy
 [run] gz partition 'course_<yourname>', ROS_DOMAIN_ID 37
 ```
 
-Both lines are normal. The partition and domain ID exist because Gazebo's discovery is **not**
+All three lines are normal; on a GPU machine the first says `NVIDIA GPU enabled` instead. The
+image and the GPU are chosen **once, when the container is created**. Re-entering an existing
+container keeps both. So after you rebuild the image, or install the Container Toolkit, start a
+new container:
+
+```bash
+./run.sh --fresh      # deletes the container and starts a new one; your shared folder is kept
+```
+
+`run.sh` tells you when this applies: re-entering a container whose image has since been rebuilt
+prints `has been rebuilt since this container was created`. `./run.sh --help` lists the options
+(`--fresh`, and `--gpu` / `--cpu` to override the detection for a new container).
+
+The partition and domain ID exist because Gazebo's discovery is **not** The partition and domain ID exist because Gazebo's discovery is **not**
 scoped by `ROS_DOMAIN_ID` and travels by multicast: without them, on a shared classroom network,
 one student's PX4 can find another student's Gazebo and spawn its aircraft into somebody else's
 world. Do not set `USE_HOST_NETWORK=1`, and do not "fix" your networking by doing so.
@@ -288,6 +338,12 @@ Read it like this:
 
 - **`ok`** — fine, move on.
 - **`warn  no CUDA`** — expected on any machine without an NVIDIA GPU. **Not a problem.**
+- **`warn  GPU present, but this is the CPU image`** — fine; Gazebo still renders on the GPU.
+  For YOLO on it too, see section 4.
+- **`warn  this is the GPU image, but no GPU reached the container`** — the container was
+  started without the GPU. Fix the Container Toolkit (section 4), then `./run.sh --fresh`.
+- **`warn  no GPU for rendering`** — Gazebo is rendering in software. Expected without a GPU;
+  check the real-time factor (troubleshooting, "The ground is flat grey").
 - **`warn  no DISPLAY`** — no Gazebo, RViz or QGroundControl windows. Either start `run.sh` from
   a graphical desktop, or use the browser desktop (section 6a). Sort this out before Day 1.
 - **`warn  no workspace yet`** — run `course init`.
@@ -386,7 +442,7 @@ session, not on the morning of it.
 - [ ] My OS is on the supported list (or I have spoken to the instructor).
 - [ ] At least 20 GB of free disk space.
 - [ ] `docker run --rm hello-world` works **without `sudo`**.
-- [ ] (NVIDIA GPU only) `docker run --rm --gpus all ubuntu nvidia-smi` prints my GPU.
+- [ ] (NVIDIA GPU only) `docker run --rm --gpus all ubuntu:24.04 nvidia-smi` prints my GPU.
 - [ ] I cloned the repo and ran `./install.sh` to completion.
 - [ ] The image is pulled — `docker image ls` shows it.
 - [ ] `~/drone_course_shared_volume/ros2_ws/src` exists on my machine.

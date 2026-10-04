@@ -22,8 +22,16 @@ The same code runs in simulation and on the real X500 V2 with a SIYI A8 mini.
 
 ```bash
 git clone <this repo> && cd drone-course-sim
-./install.sh          # checks Docker, pulls the image, creates the shared volume
+./install.sh          # checks Docker and the GPU, pulls the image, creates the shared volume
 ./run.sh              # drops you into the container
+```
+
+With an NVIDIA GPU, optionally build the GPU image and switch to it (details in
+[`docs/prework.md`](docs/prework.md) §4):
+
+```bash
+./build.sh            # detects the GPU: builds drone-course-sim:jazzy-gpu, or :jazzy without one
+./run.sh --fresh      # a new container from the newest image; the shared volume is kept
 ```
 
 Inside the container:
@@ -70,7 +78,21 @@ build-time import guard fails the build rather than the class.
 
 **torch comes from the CPU index.** The default PyPI wheel pulls `cuda-toolkit`, `cudnn`,
 `cublas` and `triton` — roughly 3 GB that most student laptops cannot use. YOLO11n on CPU is
-fast enough for every lab. A CUDA variant is a separate image tag, not the default.
+fast enough for every lab. The GPU image is the same Dockerfile with `TORCH_VARIANT=cu128`,
+tagged `drone-course-sim:jazzy-gpu`; `build.sh` picks it when Docker can use an NVIDIA GPU, and
+the build fails if the torch it installed is not the variant it asked for.
+
+**GPU detection asks Docker, not the driver.** `docker/gpu.sh`, shared by `install.sh`,
+`build.sh` and `run.sh`, runs `docker run --gpus all ... true`. `nvidia-smi` alone says nothing
+about the Container Toolkit, and `docker info` does not list a runtime on Docker Desktop or
+CDI-only setups. A GPU that the driver sees but Docker cannot use is reported as such — it is
+the most fixable of the three cases.
+
+**GPU rendering is set by `course sim`, not container-wide.** Passing the GPU through is not
+enough: EGL picks Mesa, fails, and Gazebo falls back to software rendering — 0.38 real-time
+factor instead of 1.00 while recording the course media (spike note 38). `course sim` points EGL and GLX at the NVIDIA vendor when the container has it,
+and at Mesa's `d3d12` driver under WSL2. It is scoped to the simulator because forcing the NVIDIA
+GLX vendor on RViz and QGroundControl on the browser desktop has not been tested.
 
 **The ground is textured, and that is not decoration.** PX4's stock `ground_plane` is one
 untextured grey quad. Under it, an aircraft translating at 4 m/s renders as a *static image*,

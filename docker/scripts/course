@@ -60,9 +60,37 @@ doctor() {
     echo "Perception"
     python3 -c "import ultralytics" 2>/dev/null && ok "ultralytics" || bad "ultralytics missing"
     [ -f "${YOLO_WEIGHTS:-/opt/models/yolo11n.pt}" ] && ok "yolo11n weights baked in" || bad "yolo11n weights missing"
+    # Three ways to be on the CPU, and only the first one is the student's
+    # machine. The other two are a container that does not match the host.
+    local torch_v
+    torch_v="$(python3 -c "import torch; print(torch.__version__)" 2>/dev/null || echo unknown)"
+    case "$torch_v" in
+        *+cu*)   ok "torch $torch_v (CUDA build)" ;;
+        unknown) bad "torch not importable" ;;
+        *)       ok "torch $torch_v (CPU build)" ;;
+    esac
     if python3 -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
-        ok "CUDA available"
+        ok "CUDA available ($(python3 -c 'import torch; print(torch.cuda.get_device_name(0))' 2>/dev/null))"
+    elif [ "${COURSE_TORCH:-cpu}" != "cpu" ]; then
+        warn "this is the GPU image, but no GPU reached the container. On the host:"
+        warn "  ./run.sh --fresh   (needs the NVIDIA Container Toolkit; see docs/prework.md)"
+    elif [ -e /dev/nvidiactl ]; then
+        warn "GPU present, but this is the CPU image — YOLO runs on CPU (fine)."
+        warn "  For GPU inference, on the host: ./build.sh, then ./run.sh --fresh"
     else warn "no CUDA — inference will run on CPU (fine, just slower)"; fi
+    gpu_render_env
+    # A render node the user cannot open means BLACK windows on a Wayland
+    # desktop, not an error message. run.sh adds the group; an older container
+    # does not have it.
+    local node
+    for node in /dev/dri/renderD*; do
+        [ -e "$node" ] || continue
+        if [ -r "$node" ] && [ -w "$node" ]; then ok "GPU render node $node accessible"
+        else warn "cannot open $node — GUI windows may stay black. On the host: ./run.sh --fresh"; fi
+        break
+    done
+    if [ -n "${GPU_RENDER}" ]; then ok "GPU rendering for Gazebo: ${GPU_RENDER}"
+    else warn "no GPU for rendering — Gazebo runs in software and may not reach real time"; fi
 
     echo
     echo "Ground station"
@@ -125,8 +153,33 @@ init() {
     echo "On your host machine this is ~/drone_course_shared_volume/ros2_ws/src"
 }
 
+# Point OpenGL at the GPU that run.sh passed in, if any. Without this, on an
+# NVIDIA machine EGL picks Mesa, fails ("failed to open /dev/dri/renderD128"),
+# and Gazebo renders in software. While recording the course media that cost a
+# real-time factor of 0.38 instead of 1.00, and a slow simulation is an EASIER
+# one to follow a target in (spike note 38). An idle RTX 5090 desktop held 1.00
+# either way (spike note 45); a laptop CPU will not. Set here, for the simulator
+# only, rather than container-wide: forcing the NVIDIA GLX vendor on every
+# program is untested with RViz and QGroundControl on the browser desktop.
+gpu_render_env() {
+    if [ -e /dev/dxg ] && [ -d /usr/lib/wsl/lib ]; then
+        # WSL2: Mesa's d3d12 driver, on top of the Windows GPU driver.
+        export GALLIUM_DRIVER=d3d12
+        GPU_RENDER="WSL2 d3d12${MESA_D3D12_DEFAULT_ADAPTER_NAME:+ (${MESA_D3D12_DEFAULT_ADAPTER_NAME})}"
+    elif [ -f /usr/share/glvnd/egl_vendor.d/10_nvidia.json ]; then
+        export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+        export __GLX_VENDOR_LIBRARY_NAME=nvidia
+        GPU_RENDER="NVIDIA"
+    else
+        GPU_RENDER=""
+    fi
+}
+
 sim() {
+    gpu_render_env
     echo "Starting PX4 SITL with the course gimbal (partition: ${GZ_PARTITION:-unset})..."
+    if [ -n "${GPU_RENDER}" ]; then echo "Rendering on the GPU: ${GPU_RENDER}"
+    else echo "No GPU in this container: Gazebo renders in software (check the real-time factor)"; fi
     cd "$PX4_DIR" || exit 1
     make px4_sitl gz_x500_course_gimbal_course_world
 }

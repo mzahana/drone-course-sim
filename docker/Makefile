@@ -1,12 +1,20 @@
-IMAGE ?= drone-course-sim:jazzy
-PX4_VERSION ?= v1.17.0
+# Thin wrapper over ../build.sh, which picks the CPU or GPU image for this
+# machine. Use the script directly; these exist for muscle memory.
+# `make PX4_VERSION=v1.16.0 build` and `make TORCH_VARIANT=cu126 build-gpu` reach the script.
+export PX4_VERSION TORCH_VARIANT
 
-.PHONY: build rebuild shell
+.PHONY: build build-cpu build-gpu rebuild shell
 build:
-	docker build -t $(IMAGE) --build-arg PX4_VERSION=$(PX4_VERSION) -f docker/Dockerfile ..
+	cd .. && ./build.sh
+
+build-cpu:
+	cd .. && ./build.sh --cpu
+
+build-gpu:
+	cd .. && ./build.sh --gpu
 
 rebuild:
-	docker build --no-cache -t $(IMAGE) --build-arg PX4_VERSION=$(PX4_VERSION) -f docker/Dockerfile ..
+	cd .. && ./build.sh --no-cache
 
 shell:
-	docker run -it --rm $(IMAGE) bash
+	docker run -it --rm drone-course-sim:jazzy bash

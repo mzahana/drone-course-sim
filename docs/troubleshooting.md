@@ -65,9 +65,29 @@ space; `docker system prune -a` reclaims old images if you have used Docker befo
 ### `./run.sh` drops me into a *new* container and my simulation is gone
 
 `run.sh` re-enters the existing container if one is running or stopped under the name
-`drone-course`. If you renamed it, or removed it with `docker rm`, you get a fresh one. Your code
-survives regardless — it is in the shared volume on your host. **Anything outside
-`~/shared_volume` inside the container does not survive.**
+`drone-course`. If you renamed it, removed it with `docker rm`, or ran `./run.sh --fresh`, you
+get a fresh one. Your code survives regardless — it is in the shared volume on your host.
+**Anything outside `~/shared_volume` inside the container does not survive.**
+
+### I rebuilt the image (or installed the GPU toolkit) and nothing changed
+
+A container keeps the image, and the GPU setting, it was **created** with. `./run.sh` re-enters
+that same container, so it keeps running the old image. Start a new one:
+
+```bash
+./run.sh --fresh
+```
+
+`run.sh` prints `has been rebuilt since this container was created` when this is what is going
+on. Your shared volume is kept; anything else inside the old container is not.
+
+### `[run] An NVIDIA GPU is present, but Docker cannot give it to a container`
+
+The host driver works (`nvidia-smi` runs), but `docker run --gpus all` fails: the NVIDIA
+Container Toolkit is missing, or Docker was not restarted after `nvidia-ctk runtime configure`.
+Prework §4 has the three commands. When `docker run --rm --gpus all ubuntu:24.04 nvidia-smi`
+prints your GPU, run `./run.sh --fresh`. On WSL2, never install a Linux NVIDIA driver inside
+Ubuntu; the Windows driver is the one that serves WSL2.
 
 ---
 
@@ -660,6 +680,25 @@ delete it and start a fresh one — your code is in the shared volume and is not
 docker rm -f drone-course && ./run.sh
 ```
 
+### Gazebo, QGroundControl or RViz opens a completely black window
+
+The window appears, has a title bar, and stays black. No error in the terminal.
+
+On a **Wayland** desktop (the Ubuntu 24.04 default), the container's windows go through XWayland,
+and NVIDIA's OpenGL there passes each frame through the GPU's render node,
+`/dev/dri/renderD128`. That device belongs to the host's `render` group, and the container user
+is not in it unless `run.sh` added it. The only trace is a log line:
+`libEGL warning: failed to open /dev/dri/renderD128: Permission denied`.
+
+`course doctor` says `cannot open /dev/dri/renderD128`. Fix, on the host:
+
+```bash
+./run.sh --fresh
+```
+
+`run.sh` adds the render node's group when it creates a container; a container created by an
+older `run.sh` does not have it.
+
 ### The ground is flat grey, and everything is slow
 
 Gazebo has fallen back to software rendering. The course field is a textured, mown grass surface;
@@ -677,13 +716,20 @@ seconds, so a slow simulation is a system with less latency than the real aircra
 `course score` will flatter you for it. The scorer prints the factor it saw, and turns it yellow
 below 0.9, for exactly this reason.
 
-On a machine with an NVIDIA GPU, the usual cause is that EGL picked the Mesa vendor and failed:
+First, does the container have the GPU at all? `course doctor` says, under Perception:
+`ok GPU rendering for Gazebo` or `warn no GPU for rendering`. If it warns on a machine with an
+NVIDIA GPU, the container was created without it — fix the Container Toolkit (prework §4), then
+`./run.sh --fresh` on the host.
+
+If it has the GPU, `course sim` already points EGL and GLX at the NVIDIA driver. A simulator
+started some other way — `make px4_sitl ...` typed by hand — does not get that, and EGL picks
+the Mesa vendor and fails:
 
 ```bash
 grep -i "libEGL\|dri2" /tmp/gzgui.log          # 'failed to create dri2 screen' means Mesa
 ```
 
-Force the NVIDIA vendor and restart the GUI:
+Use `course sim`, or force the NVIDIA vendor yourself and restart:
 
 ```bash
 export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
@@ -699,6 +745,10 @@ Expected and fine. On CPU, YOLO11n is **22–26 ms per frame at 640 px** and **4
 default of 960**, and the detector is throttled to 10 Hz either way, so there is headroom. The
 default image ships the CPU PyTorch build deliberately. Do not drop `imgsz` back to 640 to buy
 speed you do not need — see the entry above for what it costs you.
+
+With an NVIDIA GPU you can have it on the GPU: `./build.sh` on the host detects the GPU and builds
+`drone-course-sim:jazzy-gpu`, then `./run.sh --fresh` starts a container from it. `course doctor`
+then reports `torch ... (CUDA build)` and `CUDA available`.
 
 ---
 

@@ -1,30 +1,133 @@
 #!/usr/bin/env bash
 # Start (or re-enter) the course container.
+#
+#   ./run.sh            start the container, or open another shell in it
+#   ./run.sh --fresh    delete the container and start a new one from the
+#                       current image -- after ./build.sh, or to start clean.
+#                       Your shared volume is kept; anything else inside the
+#                       old container is not.
+#   ./run.sh --gpu      with a new container: require the NVIDIA GPU
+#   ./run.sh --cpu      with a new container: ignore any GPU
+#
+# The image is chosen when the container is created: drone-course-sim:jazzy-gpu
+# if Docker can use an NVIDIA GPU here and that image exists, otherwise
+# drone-course-sim:jazzy. IMAGE=... overrides the choice.
 set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${HERE}/docker/gpu.sh"
 
-IMAGE="${IMAGE:-drone-course-sim:jazzy}"
+usage() { sed -n '4,14p' "$0" | sed 's/^# \{0,1\}//'; }
+
+FRESH=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f|--fresh) FRESH=1 ;;
+        --gpu) GPU=1 ;;
+        --cpu) GPU=0 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "unknown option: $1"; usage; exit 2 ;;
+    esac
+    shift
+done
+
 NAME="${NAME:-drone-course}"
 SHARED="${SHARED:-$HOME/drone_course_shared_volume}"
 
 mkdir -p "${SHARED}/ros2_ws/src"
 
-# Re-enter if it is already up.
-if [ "$(docker ps -q -f name="^${NAME}$")" ]; then
-    exec docker exec -it "${NAME}" bash
+if [ "${FRESH}" = "1" ] && [ -n "$(docker ps -aq -f name="^${NAME}$")" ]; then
+    echo "[run] --fresh: removing container '${NAME}' (${SHARED} is kept)"
+    docker rm -f "${NAME}" >/dev/null
 fi
-if [ "$(docker ps -aq -f name="^${NAME}$")" ]; then
-    docker start "${NAME}" >/dev/null
+
+# Re-enter if it already exists. A container keeps the image it was created
+# from, so a rebuild changes nothing here until --fresh -- which is the single
+# most confusing thing about Docker for a newcomer. Say so when it applies.
+if [ -n "$(docker ps -aq -f name="^${NAME}$")" ]; then
+    if [ -n "${GPU:-}" ]; then
+        echo "[run] --gpu/--cpu only apply to a new container; add --fresh"
+    fi
+    CUR_IMAGE="$(docker inspect -f '{{.Config.Image}}' "${NAME}")"
+    CUR_ID="$(docker inspect -f '{{.Image}}' "${NAME}")"
+    TAG_ID="$(docker image inspect -f '{{.Id}}' "${CUR_IMAGE}" 2>/dev/null || true)"
+    if [ -n "${TAG_ID}" ] && [ "${TAG_ID}" != "${CUR_ID}" ]; then
+        echo "[run] ${CUR_IMAGE} has been rebuilt since this container was created."
+        echo "      ./run.sh --fresh switches to it (your shared volume is kept)."
+    elif [ "${CUR_IMAGE}" = "${CPU_TAG}" ] && docker image inspect "${GPU_TAG}" >/dev/null 2>&1 \
+         && [ "${GPU:-auto}" != "0" ] && [ "${GPU:-auto}" != "cpu" ]; then
+        echo "[run] this container runs the CPU image, and ${GPU_TAG} exists."
+        echo "      ./run.sh --fresh switches to it (your shared volume is kept)."
+    fi
+    if [ -z "$(docker ps -q -f name="^${NAME}$")" ]; then
+        docker start "${NAME}" >/dev/null
+    fi
     exec docker exec -it "${NAME}" bash
 fi
 
-# GPU is optional: the course runs on CPU, just slower at inference.
-GPU_ARGS=()
-if command -v nvidia-smi >/dev/null 2>&1 && docker info 2>/dev/null | grep -qi nvidia; then
-    GPU_ARGS=(--gpus all --env NVIDIA_DRIVER_CAPABILITIES=all)
-    echo "[run] NVIDIA runtime detected — GPU enabled"
-else
-    echo "[run] no NVIDIA runtime — running on CPU"
+# ---------------------------------------------------------------------------
+# GPU. Optional: the course runs on CPU, with slower inference and, without
+# GPU rendering, a simulator that may not reach real time (spike note 38).
+# ---------------------------------------------------------------------------
+detect_gpu
+if [ -z "${IMAGE:-}" ]; then
+    if [ "${GPU_STATE}" = "ok" ] && docker image inspect "${GPU_TAG}" >/dev/null 2>&1; then
+        IMAGE="${GPU_TAG}"
+    elif docker image inspect "${CPU_TAG}" >/dev/null 2>&1; then
+        IMAGE="${CPU_TAG}"
+    elif docker image inspect "${GPU_TAG}" >/dev/null 2>&1; then
+        IMAGE="${GPU_TAG}"
+    else
+        echo "[run] no course image on this machine. Run ./install.sh (or ./build.sh) first."
+        exit 1
+    fi
 fi
+
+GPU_ARGS=()
+case "${GPU_STATE}" in
+    ok)
+        GPU_ARGS=(--gpus all --env NVIDIA_DRIVER_CAPABILITIES=all)
+        if [ "${IMAGE}" = "${GPU_TAG}" ]; then
+            echo "[run] NVIDIA GPU enabled -- rendering and YOLO on the GPU"
+        else
+            echo "[run] NVIDIA GPU enabled for rendering; YOLO stays on the CPU in ${IMAGE}."
+            echo "      ./build.sh builds the GPU image, then ./run.sh --fresh."
+        fi ;;
+    driver)
+        echo "[run] running on CPU"
+        gpu_toolkit_hint ;;
+    *)
+        echo "[run] no NVIDIA GPU -- running on CPU" ;;
+esac
+
+# WSL2 has no /dev/nvidia*. The GPU is reached through /dev/dxg, and OpenGL
+# through Mesa's d3d12 driver and the libraries Windows puts in /usr/lib/wsl.
+# This also accelerates Gazebo on an Intel or AMD GPU, so it does not wait for
+# NVIDIA. `course sim` selects the d3d12 driver when /dev/dxg is present.
+# Written to Microsoft's and NVIDIA's documentation; not yet tested on WSL.
+if [ "${IS_WSL}" = "1" ] && [ -e /dev/dxg ]; then
+    GPU_ARGS+=(--device /dev/dxg
+               --volume /usr/lib/wsl:/usr/lib/wsl
+               --env LD_LIBRARY_PATH=/usr/lib/wsl/lib)
+    # A laptop has an integrated GPU too; d3d12 should pick the NVIDIA one.
+    [ "${GPU_STATE}" = "ok" ] && GPU_ARGS+=(--env MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA)
+    echo "[run] WSL2: GPU rendering through /dev/dxg"
+fi
+# The GPU's render node. On a Wayland desktop, X11 windows from the container
+# go through XWayland, and NVIDIA's OpenGL there hands frames to the
+# compositor through /dev/dri/renderD128 -- which is mode 660, group `render`
+# on the host. The container user is not in that group (its gid differs per
+# machine, 992 here), so every OpenGL window -- Gazebo, QGroundControl, RViz --
+# opens and stays BLACK, with no error beyond a libEGL warning in a log nobody
+# reads. Add the device's own gid, numerically; the name need not exist inside.
+DRI_GIDS=()
+for dev in /dev/dri/renderD* /dev/dri/card*; do
+    [ -e "$dev" ] || continue
+    gid="$(stat -c %g "$dev")"
+    [ "$gid" != "0" ] && [[ " ${DRI_GIDS[*]} " != *" --group-add ${gid} "* ]] \
+        && DRI_GIDS+=(--group-add "$gid")
+done
+GPU_ARGS+=("${DRI_GIDS[@]}")
+echo "[run] new container '${NAME}' from ${IMAGE}"
 
 xhost +local:docker >/dev/null 2>&1 || true
 
